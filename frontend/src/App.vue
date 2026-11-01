@@ -1,8 +1,17 @@
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
-import { message, Modal } from 'ant-design-vue'
-import { PhBuildings, PhChartBar, PhWrench, PhDoorOpen, PhStudent, PhHouseLine, PhBed, PhUsers, PhSignOut, PhPlus } from '@phosphor-icons/vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { Grid, message, Modal } from 'ant-design-vue'
+import { PhBuildings, PhBed, PhWrench, PhList, PhPlus } from '@phosphor-icons/vue'
+import AppNavigation from './components/AppNavigation.vue'
 
+const theme = {
+  token: { colorPrimary: '#4F46E5', borderRadius: 12, colorText: '#0F172A', colorBgLayout: '#F8FAFC' },
+  components: { Menu: { itemSelectedBg: '#EEF2FF', itemSelectedColor: '#4F46E5', itemBorderRadius: 8 } }
+}
+const screens = Grid.useBreakpoint()
+const isMobile = computed(() => !screens.value.md)
+const drawerOpen = ref(false)
+watch(isMobile, mobile => { if (!mobile) drawerOpen.value = false })
 const user = ref(null), current = ref('statistics'), busy = ref(false), saving = ref(false)
 const csrf = ref({}), login = reactive({ username: '', password: '' })
 const page = ref(1), result = ref({ rows: [], total: 0 }), meta = ref({ title: '', fields: [] }), stats = ref(null)
@@ -48,8 +57,12 @@ const columns = computed(() => {
     {title:'退宿时间',dataIndex:'check_out_at',key:'check_out_at'}, {title:'操作',key:'actions',width:180}]
 })
 const dormColumns = [{title:'楼栋',dataIndex:'building'}, {title:'宿舍',dataIndex:'room_no'}, {title:'已占用',dataIndex:'occupied'}, {title:'床位总数',dataIndex:'total'}, {title:'入住率',key:'rate'}]
-const repairStateColumns = [{title:'状态',key:'status'}, {title:'数量',dataIndex:'total'}]
-function rate(n, total) { return `${total ? (Number(n) * 100 / Number(total)).toFixed(1) : '0.0'}%` }
+const repairStateColors = { WAITING: 'default', IN_PROGRESS: 'processing', COMPLETED: 'success', CONFIRMED: 'success' }
+const repairStates = computed(() => ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CONFIRMED'].map(status => ({
+  status, total: stats.value?.repairStates.find(item => item.status === status)?.total ?? 0
+})))
+function percentage(n, total) { return total ? Math.min(100, Math.max(0, Number((Number(n) * 100 / Number(total)).toFixed(1)))) : 0 }
+function rate(n, total) { return `${percentage(n, total).toFixed(1)}%` }
 function date(value) { return value ? String(value).replace('T', ' ').slice(0,16) : '—' }
 async function token() { const r = await fetch('/api/csrf', {credentials:'same-origin'}); if(!r.ok) throw Error('无法获取安全令牌'); csrf.value = await r.json() }
 async function request(url, { method='GET', data, formData=false }={}) {
@@ -67,7 +80,7 @@ async function doLogin() {
   try { await request('/login',{method:'POST',data:login,formData:true}); await token(); user.value=await request('/session'); current.value=admin.value?'statistics':'repairs'; page.value=1; login.password=''; await load() }
   catch(e) { message.error(e.message); await token() } finally { saving.value=false }
 }
-async function logout() { try { await request('/logout',{method:'POST'}); user.value=null; await token() } catch(e) { message.error(e.message) } }
+async function logout() { try { await request('/logout',{method:'POST'}); drawerOpen.value=false; user.value=null; await token() } catch(e) { message.error(e.message) } }
 async function load() {
   busy.value=true
   try {
@@ -78,7 +91,7 @@ async function load() {
     page.value=result.value.page
   } catch(e) { message.error(e.message) } finally { busy.value=false }
 }
-async function navigate(key) { current.value=key; page.value=1; await load() }
+async function navigate(key) { drawerOpen.value=false; current.value=key; page.value=1; await load() }
 function changePage(p) { page.value=p.current; load() }
 function resetForm() { for(const key of Object.keys(form)) delete form[key]; editId.value=null }
 async function openEditor(record=null) {
@@ -129,6 +142,7 @@ onMounted(initialize)
 </script>
 
 <template>
+  <a-config-provider :theme="theme">
   <div v-if="!user" class="login-wrap">
     <div class="login-card"><div class="login-icon"><PhBuildings :size="26" weight="duotone" /></div><p class="eyebrow">DORMITORY MANAGEMENT</p><h1>学生公寓管理系统</h1><p class="login-subtitle">登录以管理宿舍事务</p>
       <a-form :model="login" layout="vertical" @finish="doLogin">
@@ -139,22 +153,65 @@ onMounted(initialize)
     </div>
   </div>
   <a-layout v-else class="app-layout">
-    <a-layout-sider class="sider" :width="228" breakpoint="lg" collapsed-width="0">
-      <div class="brand">宿舍管理<small>学生公寓</small></div><div class="menu-caption">工作台</div>
-      <a-menu theme="dark" mode="inline" :selected-keys="[current]" @click="({key}) => navigate(key)">
-        <a-menu-item v-if="admin" key="statistics"><template #icon><PhChartBar :size="18" /></template>数据概览</a-menu-item><a-menu-item key="repairs"><template #icon><PhWrench :size="18" /></template>报修管理</a-menu-item><a-menu-item key="housing"><template #icon><PhDoorOpen :size="18" /></template>入住与退宿</a-menu-item>
-        <a-menu-item-group v-if="admin" title="基础信息"><a-menu-item key="students"><template #icon><PhStudent :size="18" /></template>学生管理</a-menu-item><a-menu-item key="dormitories"><template #icon><PhHouseLine :size="18" /></template>宿舍管理</a-menu-item><a-menu-item key="beds"><template #icon><PhBed :size="18" /></template>床位管理</a-menu-item><a-menu-item key="users"><template #icon><PhUsers :size="18" /></template>账号管理</a-menu-item></a-menu-item-group>
-      </a-menu>
-      <div class="sider-footer"><strong>{{ user.username }}</strong><small>{{ admin ? '管理员' : '学生' }}</small><a-button type="link" @click="logout"><template #icon><PhSignOut :size="16" /></template>退出登录</a-button></div>
+    <a-layout-sider v-if="!isMobile" class="sider" :width="248">
+      <AppNavigation :user="user" :current="current" @navigate="navigate" @logout="logout" />
     </a-layout-sider>
+    <a-layout class="main-layout">
+      <a-layout-header v-if="isMobile" class="mobile-header">
+        <a-button type="text" class="menu-toggle" aria-label="打开导航" @click="drawerOpen = true">
+          <template #icon><PhList :size="22" /></template>
+        </a-button>
+        <span class="mobile-brand">学生公寓</span>
+        <a-avatar class="user-avatar" :size="32">{{ user.username.charAt(0).toUpperCase() }}</a-avatar>
+      </a-layout-header>
+      <a-drawer :open="isMobile && drawerOpen" placement="left" :width="280" :closable="false"
+        :body-style="{ padding: 0 }" @close="drawerOpen = false">
+        <AppNavigation :user="user" :current="current" drawer @navigate="navigate" @logout="logout" @close="drawerOpen = false" />
+      </a-drawer>
     <a-layout-content class="content">
       <div class="page-header"><div><p class="eyebrow">{{ adminKeys.includes(current) ? '基础信息' : '工作台' }}</p><h1>{{ title }}</h1></div>
         <a-button v-if="current !== 'statistics'" type="primary" @click="openEditor()"><template #icon><PhPlus :size="16" /></template>{{ current === 'repairs' ? '提交报修' : current === 'housing' ? '入住申请' : '新增' }}</a-button>
       </div>
-      <template v-if="current === 'statistics' && stats">
-        <div class="metrics"><a-card><div class="metric-label">床位入住率</div><div class="metric-value">{{ rate(stats.beds.occupied,stats.beds.total) }}</div><div class="muted">已占用 {{ stats.beds.occupied }} / {{ stats.beds.total }} 个床位</div></a-card><a-card><div class="metric-label">报修处理率</div><div class="metric-value">{{ rate(stats.repairs.done,stats.repairs.total) }}</div><div class="muted">已完成或确认 {{ stats.repairs.done }} / {{ stats.repairs.total }} 单</div></a-card></div>
-        <a-card title="各宿舍床位" class="section"><a-table :columns="dormColumns" :data-source="stats.dorms" :pagination="{pageSize:10,showSizeChanger:false}" :row-key="r => r.building + r.room_no" size="middle"><template #bodyCell="{column,record}"><span v-if="column.key === 'rate'">{{ rate(record.occupied,record.total) }}</span></template></a-table></a-card>
-        <a-card title="报修状态" class="section"><a-table :columns="repairStateColumns" :data-source="stats.repairStates" :pagination="false" row-key="status" size="middle"><template #bodyCell="{column,record}"><span v-if="column.key === 'status'">{{ statusLabels[record.status] }}</span></template></a-table></a-card>
+      <template v-if="current === 'statistics'">
+        <a-skeleton v-if="!stats" active />
+        <template v-else>
+          <a-row :gutter="[16, 16]" class="metrics">
+            <a-col :xs="24" :sm="12" :lg="12">
+              <a-card class="metric-card">
+                <div class="metric-heading"><span>床位入住率</span><span class="metric-icon bed-icon"><PhBed :size="22" weight="duotone" /></span></div>
+                <div class="metric-value">{{ rate(stats.beds.occupied, stats.beds.total) }}</div>
+                <a-progress :percent="percentage(stats.beds.occupied, stats.beds.total)" :show-info="false" :stroke-width="6" stroke-color="#4F46E5" />
+                <div class="metric-detail">已占用 <strong>{{ stats.beds.occupied }}</strong> / {{ stats.beds.total }} 个床位</div>
+              </a-card>
+            </a-col>
+            <a-col :xs="24" :sm="12" :lg="12">
+              <a-card class="metric-card">
+                <div class="metric-heading"><span>报修处理率</span><span class="metric-icon repair-icon"><PhWrench :size="22" weight="duotone" /></span></div>
+                <div class="metric-value">{{ rate(stats.repairs.done, stats.repairs.total) }}</div>
+                <a-progress :percent="percentage(stats.repairs.done, stats.repairs.total)" :show-info="false" :stroke-width="6" stroke-color="#0D9488" />
+                <div class="metric-detail">已完成或确认 <strong>{{ stats.repairs.done }}</strong> / {{ stats.repairs.total }} 单</div>
+              </a-card>
+            </a-col>
+          </a-row>
+          <a-card title="各宿舍床位" class="section dorm-card">
+            <a-table :columns="dormColumns" :data-source="stats.dorms" :pagination="{pageSize:10,showSizeChanger:false}"
+              :row-key="r => r.building + r.room_no" :scroll="{ x: 'max-content' }" size="middle">
+              <template #bodyCell="{column,record}">
+                <div v-if="column.key === 'rate'" class="table-rate">
+                  <a-progress :percent="percentage(record.occupied, record.total)" :show-info="false" :stroke-width="6" stroke-color="#4F46E5" />
+                  <span>{{ rate(record.occupied, record.total) }}</span>
+                </div>
+              </template>
+            </a-table>
+          </a-card>
+          <a-card title="报修状态" class="section state-card">
+            <a-row :gutter="[12, 12]">
+              <a-col v-for="item in repairStates" :key="item.status" :xs="12" :sm="12" :lg="6">
+                <div class="state-tile"><a-tag :color="repairStateColors[item.status]">{{ statusLabels[item.status] }}</a-tag><div class="state-count">{{ item.total }} <span>单</span></div></div>
+              </a-col>
+            </a-row>
+          </a-card>
+        </template>
       </template>
       <a-card v-else class="section table-card"><a-table :columns="columns" :data-source="result.rows" :pagination="pagination" :loading="busy" row-key="id" :scroll="{x:'max-content'}" @change="changePage">
         <template #bodyCell="{column,record,text}">
@@ -172,7 +229,8 @@ onMounted(initialize)
           <template v-else>{{ text ?? '—' }}</template>
         </template>
       </a-table></a-card>
-    </a-layout-content>
+      </a-layout-content>
+    </a-layout>
   </a-layout>
   <a-modal v-model:open="showEditor" :title="(editId ? '编辑' : current === 'repairs' ? '提交' : current === 'housing' ? '提交' : '新增') + (adminKeys.includes(current) ? meta.title : current === 'repairs' ? '报修' : '入住申请')" ok-text="保存" cancel-text="取消" :confirm-loading="saving" destroy-on-close @ok="saveEditor">
     <a-form ref="formRef" :model="form" :rules="rules" layout="vertical" class="modal-form">
@@ -182,4 +240,5 @@ onMounted(initialize)
   </a-modal>
   <a-modal v-model:open="showEvaluate" title="确认并评价" ok-text="确认评价" cancel-text="取消" :confirm-loading="saving" @ok="submitEvaluation"><a-textarea v-model:value="evaluation" :rows="4" :maxlength="500" show-count placeholder="填写评价" /></a-modal>
   <a-modal v-model:open="showAssign" title="分配床位" ok-text="分配" cancel-text="取消" :confirm-loading="saving" @ok="submitAssign"><a-select v-model:value="selectedBed" style="width:100%" placeholder="请选择空床位" :options="bedOptions" /></a-modal>
+  </a-config-provider>
 </template>

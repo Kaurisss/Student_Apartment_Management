@@ -51,13 +51,24 @@ mvn clean package
 
 Vite 将前端构建到 `src/main/resources/static`，Spring Boot 同源提供页面和 `/api` 接口，现场演示无需另外启动前端服务器。开发时可运行 `npm run dev`，其 `/api` 会代理至 `localhost:8080`，需先启动后端。
 
+## 前端响应式测试
+
+```bash
+cd frontend
+npm ci
+npx playwright install chromium
+npm run test:ui
+```
+
+测试使用模拟接口数据，覆盖桌面与移动端导航、767/768 像素断点、表格横向滚动、学生角色菜单和空统计。也可通过 `PLAYWRIGHT_CHROMIUM_EXECUTABLE` 指定已安装的 Chromium 路径。
+
 ## 项目结构
 
 - `src/main/java/cn/edu/dorm/SecurityConfig.java`：登录、角色授权、密码哈希（兼容作业2初始密码格式）和 CSRF。
 - `AdminService.java`：四类基础数据的校验、分页与维护。
 - `BusinessService.java`：报修、入住状态变更，事务与行锁、统计查询。
 - `ApiController.java`：JSON 接口、参数传递及错误反馈。
-- `frontend/src/App.vue`：Vue 页面，使用 Ant Design Vue 组件和 Phosphor 图标；`frontend/src/style.css` 为少量界面样式。
+- `frontend/src/App.vue`：Vue 页面，使用 Ant Design Vue 组件和 Phosphor 图标；`frontend/src/components/AppNavigation.vue` 为桌面与移动端共用的导航；`frontend/src/style.css` 为界面样式。
 - `src/main/resources/static/`：已经构建好的前端文件，随 Java 包一起交付。
 - `sql/assignment2-original.sql`：从作业2原样提取的建库、建表和数据。
 - `docs/`：部署说明、测试与讲解提纲、AI 使用说明草稿。

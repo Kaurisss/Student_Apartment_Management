@@ -8,3 +8,6 @@ __pycache__/
 *.py[cod]
 .env
 .env.*
+
+/frontend/test-results/
+/frontend/playwright-report/
