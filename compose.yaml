@@ -1,0 +1,23 @@
+services:
+  mysql:
+    image: mysql:8.0
+    command: ["--innodb-redo-log-capacity=32M", "--innodb-buffer-pool-size=128M"]
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:-dorm_root_demo}
+      MYSQL_DATABASE: dorm_management
+      MYSQL_USER: dorm_app
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-dorm_app_demo}
+      TZ: Asia/Shanghai
+    ports:
+      - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
+    volumes:
+      - dorm_mysql:/var/lib/mysql
+      - ./sql/assignment2-original.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/mysql-client.cnf:/etc/mysql/conf.d/dorm-client.cnf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+volumes:
+  dorm_mysql:
