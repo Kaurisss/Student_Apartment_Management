@@ -1,12 +1,54 @@
 <script setup>
 import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { Grid, message, Modal } from 'ant-design-vue'
-import { PhBuildings, PhBed, PhWrench, PhList, PhPlus } from '@phosphor-icons/vue'
+import { PhList, PhPlus } from '@phosphor-icons/vue'
 import AppNavigation from './components/AppNavigation.vue'
 
 const theme = {
-  token: { colorPrimary: '#4F46E5', borderRadius: 12, colorText: '#0F172A', colorBgLayout: '#F8FAFC' },
-  components: { Menu: { itemSelectedBg: '#EEF2FF', itemSelectedColor: '#4F46E5', itemBorderRadius: 8 } }
+  token: {
+    colorPrimary: '#1E4D3A',
+    colorPrimaryHover: '#173D2E',
+    colorPrimaryActive: '#123226',
+    colorInfo: '#1E4D3A',
+    colorLink: '#1E4D3A',
+    colorError: '#8F3D32',
+    colorText: '#1A1916',
+    colorTextSecondary: '#3F3D38',
+    colorTextTertiary: '#6F6B64',
+    colorBorder: '#D4D0C6',
+    colorBorderSecondary: '#E3E0D8',
+    colorBgLayout: '#F3F1EC',
+    colorBgContainer: '#FFFFFF',
+    borderRadius: 4,
+    borderRadiusLG: 4,
+    borderRadiusSM: 2,
+    fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif',
+    fontSize: 14,
+    controlOutline: 'rgba(30, 77, 58, 0.16)',
+    controlHeight: 36
+  },
+  components: {
+    Menu: {
+      itemSelectedBg: '#E7EFE9',
+      itemSelectedColor: '#1E4D3A',
+      itemHoverBg: '#F6F5F1',
+      itemBorderRadius: 4,
+      itemHeight: 40,
+      groupTitleColor: '#6F6B64',
+      groupTitleFontSize: 12
+    },
+    Button: { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', borderRadius: 4 },
+    Table: {
+      headerBg: 'transparent',
+      headerColor: '#6F6B64',
+      headerSplitColor: 'transparent',
+      borderColor: '#E3E0D8',
+      rowHoverBg: '#F7F6F2',
+      cellPaddingBlock: 12,
+      cellPaddingInline: 12
+    },
+    Tag: { defaultBg: '#F3F1EC', defaultColor: '#3F3D38' }
+  }
 }
 const screens = Grid.useBreakpoint()
 const isMobile = computed(() => !screens.value.md)
@@ -57,7 +99,6 @@ const columns = computed(() => {
     {title:'退宿时间',dataIndex:'check_out_at',key:'check_out_at'}, {title:'操作',key:'actions',width:180}]
 })
 const dormColumns = [{title:'楼栋',dataIndex:'building'}, {title:'宿舍',dataIndex:'room_no'}, {title:'已占用',dataIndex:'occupied'}, {title:'床位总数',dataIndex:'total'}, {title:'入住率',key:'rate'}]
-const repairStateColors = { WAITING: 'default', IN_PROGRESS: 'processing', COMPLETED: 'success', CONFIRMED: 'success' }
 const repairStates = computed(() => ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CONFIRMED'].map(status => ({
   status, total: stats.value?.repairStates.find(item => item.status === status)?.total ?? 0
 })))
@@ -142,18 +183,29 @@ onMounted(initialize)
 </script>
 
 <template>
-  <a-config-provider :theme="theme">
+  <a-config-provider :theme="theme" :auto-insert-space-in-button="false">
   <div v-if="!user" class="login-wrap">
-    <div class="login-card"><div class="login-icon"><PhBuildings :size="26" weight="duotone" /></div><p class="eyebrow">DORMITORY MANAGEMENT</p><h1>学生公寓管理系统</h1><p class="login-subtitle">登录以管理宿舍事务</p>
-      <a-form :model="login" layout="vertical" @finish="doLogin">
-        <a-form-item label="用户名" name="username" :rules="[{required:true,message:'请输入用户名'}]"><a-input v-model:value="login.username" size="large" maxlength="50" autocomplete="username" /></a-form-item>
-        <a-form-item label="密码" name="password" :rules="[{required:true,message:'请输入密码'}]"><a-input-password v-model:value="login.password" size="large" maxlength="100" autocomplete="current-password" /></a-form-item>
-        <a-button type="primary" size="large" html-type="submit" block :loading="saving">登录</a-button>
-      </a-form>
-    </div>
+    <section class="login-aside">
+      <div class="login-aside-inner">
+        <h1>学生公寓管理系统</h1>
+        <div class="login-rule" aria-hidden="true"></div>
+        <p class="login-aside-copy">床位分配、报修处理、入住与退宿。</p>
+      </div>
+    </section>
+    <main class="login-main">
+      <div class="login-form">
+        <h2>登录</h2>
+        <p class="login-subtitle">使用分配的账号进入系统</p>
+        <a-form :model="login" layout="vertical" @finish="doLogin">
+          <a-form-item label="用户名" name="username" :rules="[{required:true,message:'请输入用户名'}]"><a-input v-model:value="login.username" size="large" maxlength="50" autocomplete="username" /></a-form-item>
+          <a-form-item label="密码" name="password" :rules="[{required:true,message:'请输入密码'}]"><a-input-password v-model:value="login.password" size="large" maxlength="100" autocomplete="current-password" /></a-form-item>
+          <a-button type="primary" size="large" html-type="submit" block :loading="saving">登录</a-button>
+        </a-form>
+      </div>
+    </main>
   </div>
   <a-layout v-else class="app-layout">
-    <a-layout-sider v-if="!isMobile" class="sider" :width="248">
+    <a-layout-sider v-if="!isMobile" class="sider" :width="228">
       <AppNavigation :user="user" :current="current" @navigate="navigate" @logout="logout" />
     </a-layout-sider>
     <a-layout class="main-layout">
@@ -169,7 +221,7 @@ onMounted(initialize)
         <AppNavigation :user="user" :current="current" drawer @navigate="navigate" @logout="logout" @close="drawerOpen = false" />
       </a-drawer>
     <a-layout-content class="content">
-      <div class="page-header"><div><p class="eyebrow">{{ adminKeys.includes(current) ? '基础信息' : '工作台' }}</p><h1>{{ title }}</h1></div>
+      <div class="page-header"><h1>{{ title }}</h1>
         <a-button v-if="current !== 'statistics'" type="primary" @click="openEditor()"><template #icon><PhPlus :size="16" /></template>{{ current === 'repairs' ? '提交报修' : current === 'housing' ? '入住申请' : '新增' }}</a-button>
       </div>
       <template v-if="current === 'statistics'">
@@ -178,17 +230,17 @@ onMounted(initialize)
           <a-row :gutter="[16, 16]" class="metrics">
             <a-col :xs="24" :sm="12" :lg="12">
               <a-card class="metric-card">
-                <div class="metric-heading"><span>床位入住率</span><span class="metric-icon bed-icon"><PhBed :size="22" weight="duotone" /></span></div>
+                <div class="metric-label">床位入住率</div>
                 <div class="metric-value">{{ rate(stats.beds.occupied, stats.beds.total) }}</div>
-                <a-progress :percent="percentage(stats.beds.occupied, stats.beds.total)" :show-info="false" :stroke-width="6" stroke-color="#4F46E5" />
+                <a-progress :percent="percentage(stats.beds.occupied, stats.beds.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
                 <div class="metric-detail">已占用 <strong>{{ stats.beds.occupied }}</strong> / {{ stats.beds.total }} 个床位</div>
               </a-card>
             </a-col>
             <a-col :xs="24" :sm="12" :lg="12">
               <a-card class="metric-card">
-                <div class="metric-heading"><span>报修处理率</span><span class="metric-icon repair-icon"><PhWrench :size="22" weight="duotone" /></span></div>
+                <div class="metric-label">报修处理率</div>
                 <div class="metric-value">{{ rate(stats.repairs.done, stats.repairs.total) }}</div>
-                <a-progress :percent="percentage(stats.repairs.done, stats.repairs.total)" :show-info="false" :stroke-width="6" stroke-color="#0D9488" />
+                <a-progress :percent="percentage(stats.repairs.done, stats.repairs.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
                 <div class="metric-detail">已完成或确认 <strong>{{ stats.repairs.done }}</strong> / {{ stats.repairs.total }} 单</div>
               </a-card>
             </a-col>
@@ -198,22 +250,23 @@ onMounted(initialize)
               :row-key="r => r.building + r.room_no" :scroll="{ x: 'max-content' }" size="middle">
               <template #bodyCell="{column,record}">
                 <div v-if="column.key === 'rate'" class="table-rate">
-                  <a-progress :percent="percentage(record.occupied, record.total)" :show-info="false" :stroke-width="6" stroke-color="#4F46E5" />
+                  <a-progress :percent="percentage(record.occupied, record.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
                   <span>{{ rate(record.occupied, record.total) }}</span>
                 </div>
               </template>
             </a-table>
           </a-card>
           <a-card title="报修状态" class="section state-card">
-            <a-row :gutter="[12, 12]">
-              <a-col v-for="item in repairStates" :key="item.status" :xs="12" :sm="12" :lg="6">
-                <div class="state-tile"><a-tag :color="repairStateColors[item.status]">{{ statusLabels[item.status] }}</a-tag><div class="state-count">{{ item.total }} <span>单</span></div></div>
-              </a-col>
-            </a-row>
+            <div class="state-strip">
+              <div v-for="item in repairStates" :key="item.status" class="state-tile">
+                <div class="state-label">{{ statusLabels[item.status] }}</div>
+                <div class="state-count">{{ item.total }}<span>单</span></div>
+              </div>
+            </div>
           </a-card>
         </template>
       </template>
-      <a-card v-else class="section table-card"><a-table :columns="columns" :data-source="result.rows" :pagination="pagination" :loading="busy" row-key="id" :scroll="{x:'max-content'}" @change="changePage">
+      <a-card v-else class="section table-card"><a-table :columns="columns" :data-source="result.rows" :pagination="pagination" :loading="busy" row-key="id" size="middle" :scroll="{x:'max-content'}" @change="changePage">
         <template #bodyCell="{column,record,text}">
           <template v-if="column.key === 'student'">{{ record.student_no }} {{ record.student_name }}</template>
           <template v-else-if="column.key === 'status'"><a-tag :color="['CONFIRMED','CHECKED_IN','FREE'].includes(record.status) ? 'green' : ['IN_PROGRESS','ASSIGNED'].includes(record.status) ? 'blue' : undefined">{{ statusLabels[record.status] }}</a-tag></template>
