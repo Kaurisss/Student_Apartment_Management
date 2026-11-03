@@ -2,14 +2,30 @@ package cn.edu.dorm;
 
 import java.util.*;
 import org.springframework.jdbc.core.JdbcTemplate;
+import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class BusinessService {
     private final JdbcTemplate db;
-    public BusinessService(JdbcTemplate db) { this.db=db; }
+    private final PasswordEncoder passwords;
+    public BusinessService(JdbcTemplate db, PasswordEncoder passwords) { this.db=db; this.passwords=passwords; }
     public record Page(List<Map<String,Object>> rows, int page, int pages, long total) {}
+    public Map<String,Object> profile(String username) {
+        List<Map<String,Object>> rows=db.queryForList("SELECT u.username, s.student_no, s.name FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
+        if (rows.isEmpty()) throw new IllegalArgumentException("该账号尚未关联学生信息，请联系管理员");
+        return rows.get(0);
+    }
+    @Transactional
+    public void updateProfile(String username, String name, String studentNo, String password) {
+        long id=studentId(username);
+        db.update("UPDATE student SET name=?, student_no=? WHERE id=?", text(name,"姓名",50), text(studentNo,"学号",30), id);
+        if (password != null && !password.isBlank()) {
+            if (password.length() < 6 || password.length() > 100) throw new IllegalArgumentException("密码长度须为6至100个字符");
+            db.update("UPDATE `user` u JOIN student s ON s.user_id=u.id SET u.password_hash=? WHERE s.id=?", passwords.encode(password), id);
+        }
+    }
     public Long studentId(String username) {
         List<Long> ids=db.query("SELECT s.id FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", (rs,n)->rs.getLong(1),username);
         if (ids.isEmpty()) throw new IllegalArgumentException("该账号尚未关联学生信息，请联系管理员");

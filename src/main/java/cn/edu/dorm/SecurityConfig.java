@@ -20,7 +20,7 @@ import org.springframework.http.HttpStatus;
 @Configuration
 public class SecurityConfig {
     @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
-        return http.authorizeHttpRequests(a -> a.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/dashboard", "/repairs", "/housing", "/students", "/dormitories", "/beds", "/users", "/api/csrf", "/api/login").permitAll()
+        return http.authorizeHttpRequests(a -> a.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/dashboard", "/repairs", "/housing", "/profile", "/students", "/dormitories", "/beds", "/users", "/api/csrf", "/api/login").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN").anyRequest().authenticated())
             .exceptionHandling(e -> e.defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), new AntPathRequestMatcher("/api/**")))
             .formLogin(f -> f.loginPage("/").loginProcessingUrl("/api/login")

@@ -471,6 +471,56 @@ button, input, textarea, select { font-family: inherit; }
 .actions .danger,
 .danger { color: var(--danger); }
 
+.profile-card { max-width: 440px; }
+
+.profile-card .arco-card-body { padding: 24px; }
+
+.profile-head {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+  margin-bottom: 24px;
+}
+
+.profile-avatar {
+  display: grid;
+  place-items: center;
+  width: 64px;
+  height: 64px;
+  border-radius: 50%;
+  background: #f2f3f5;
+  color: var(--ink);
+  font-size: 24px;
+  font-weight: 500;
+}
+
+.profile-id { display: grid; gap: 6px; justify-items: start; }
+
+.profile-id strong { color: var(--ink); font-size: 18px; font-weight: 500; }
+
+.profile-form .arco-input-wrapper,
+.profile-form .arco-input-wrapper:hover {
+  background: #fff;
+  border-color: rgba(29, 33, 41, 0.12);
+}
+
+.profile-form .arco-input-wrapper.arco-input-disabled,
+.profile-form .arco-input-wrapper.arco-input-disabled:hover {
+  background: #e5e6eb;
+  border-color: transparent;
+  color: var(--muted);
+}
+
+.profile-form > .arco-btn { width: auto; padding: 0 28px; }
+
+.detail { display: grid; gap: 12px; margin: 0; }
+
+.detail div { display: grid; gap: 2px; }
+
+.detail dt { color: var(--muted); font-size: 13px; }
+
+.detail dd { margin: 0; }
+
 .filters {
   display: flex;
   flex-wrap: wrap;

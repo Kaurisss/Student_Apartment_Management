@@ -1,7 +1,7 @@
 <script setup>
 import {
   PhBed, PhChartBar, PhDoorOpen, PhHouseLine,
-  PhSignOut, PhStudent, PhUsers, PhWrench, PhX
+  PhSignOut, PhStudent, PhUser, PhUsers, PhWrench, PhX
 } from '@phosphor-icons/vue'
 
 defineProps({
@@ -27,6 +27,9 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
       <a-menu :selected-keys="[current]" @menu-item-click="key => emit('navigate', key)">
         <a-menu-item v-if="user.admin" key="statistics" role="menuitem">
           <template #icon><PhChartBar :size="18" /></template>数据概览
+        </a-menu-item>
+        <a-menu-item v-if="!user.admin" key="profile" role="menuitem">
+          <template #icon><PhUser :size="18" /></template>个人信息
         </a-menu-item>
         <a-menu-item key="repairs" role="menuitem">
           <template #icon><PhWrench :size="18" /></template>报修管理

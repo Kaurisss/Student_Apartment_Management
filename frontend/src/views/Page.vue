@@ -1,14 +1,18 @@
 <script setup>
-import { inject } from 'vue'
+import { inject, ref } from 'vue'
 import { PhPlus } from '@phosphor-icons/vue'
 
 const d = inject('desk')
+const viewOpen = ref(false)
+const viewKind = ref('')
+const viewRecord = ref(null)
+function openView(kind, record) { viewKind.value = kind; viewRecord.value = record; viewOpen.value = true }
 </script>
 
 <template>
   <div class="page-header">
     <h1>{{ d.title }}</h1>
-    <a-button v-if="d.current !== 'statistics'" type="primary" @click="d.openEditor()">
+    <a-button v-if="d.current !== 'statistics' && d.current !== 'profile'" type="primary" @click="d.openEditor()">
       <template #icon><PhPlus :size="16" /></template>{{ d.current === 'repairs' ? '提交报修' : d.current === 'housing' ? '入住申请' : '新增' }}
     </a-button>
   </div>
@@ -22,6 +26,19 @@ const d = inject('desk')
       <a-option value="CONFIRMED">已确认</a-option>
     </a-select>
   </div>
+  <a-card v-if="d.current === 'profile'" class="section profile-card" :bordered="false">
+    <div class="profile-head">
+      <span class="profile-avatar">{{ (d.profile.username || '?').charAt(0).toUpperCase() }}</span>
+      <div class="profile-id"><strong>{{ d.profile.username || '—' }}</strong><a-tag>学生</a-tag></div>
+    </div>
+    <a-form :model="d.profile" layout="vertical" class="profile-form" @submit="d.saveProfile">
+      <a-form-item label="用户名"><a-input :model-value="d.profile.username" disabled /></a-form-item>
+      <a-form-item field="student_no" label="学号" :rules="[{ required:true, message:'请填写学号' }]"><a-input v-model="d.profile.student_no" :max-length="30" /></a-form-item>
+      <a-form-item field="name" label="姓名" :rules="[{ required:true, message:'请填写姓名' }]"><a-input v-model="d.profile.name" :max-length="50" /></a-form-item>
+      <a-form-item field="password" label="新密码"><a-input-password v-model="d.profile.password" :max-length="100" placeholder="留空则不修改" /></a-form-item>
+      <a-button type="primary" html-type="submit" :loading="d.saving">保存</a-button>
+    </a-form>
+  </a-card>
   <template v-if="d.current === 'statistics'">
     <a-skeleton v-if="!d.stats" animation />
     <template v-else>
@@ -63,7 +80,7 @@ const d = inject('desk')
       </a-card>
     </template>
   </template>
-  <a-card v-else class="section table-card" :bordered="false">
+  <a-card v-else-if="d.current !== 'profile'" class="section table-card" :bordered="false">
     <a-table :columns="d.columns" :data="d.result.rows" :pagination="d.pagination" :loading="d.busy" row-key="id" :scroll="{ x:'max-content' }" size="medium" @page-change="d.changePage">
       <template #cell="{ column, record }">
         <template v-if="column.key === 'student'">{{ record.student_no }} {{ record.student_name }}</template>
@@ -76,6 +93,7 @@ const d = inject('desk')
             <button type="button" class="danger" @click="d.remove(record)">删除</button>
           </template>
           <template v-else-if="d.current === 'repairs'">
+            <button type="button" @click="openView('repair', record)">查看</button>
             <a-button v-if="d.admin && record.status === 'WAITING'" type="primary" size="mini" @click="d.action('repairs', record.id, 'accept')">受理</a-button>
             <template v-if="record.status === 'WAITING'">
               <button type="button" @click="d.openEditor(record)">编辑</button>
@@ -85,6 +103,7 @@ const d = inject('desk')
             <button v-if="!d.admin && record.status === 'COMPLETED'" type="button" @click="d.openEvaluation(record.id)">确认评价</button>
           </template>
           <template v-else>
+            <button v-if="record.bed_label" type="button" @click="openView('housing', record)">查看分配</button>
             <template v-if="record.status === 'PENDING'">
               <button type="button" class="danger" @click="d.remove(record)">删除</button>
               <button v-if="d.admin" type="button" @click="d.openAssign(record.id)">分配床位</button>
@@ -101,4 +120,21 @@ const d = inject('desk')
       </template>
     </a-table>
   </a-card>
+  <a-modal v-model:visible="viewOpen" :title="viewKind === 'repair' ? '报修详情' : '床位分配'" :footer="false">
+    <dl v-if="viewRecord" class="detail">
+      <template v-if="viewKind === 'repair'">
+        <div><dt>故障描述</dt><dd>{{ viewRecord.description || '—' }}</dd></div>
+        <div><dt>状态</dt><dd>{{ d.statusLabels[viewRecord.status] }}</dd></div>
+        <div><dt>提交时间</dt><dd>{{ d.date(viewRecord.created_at) }}</dd></div>
+        <div><dt>评价</dt><dd>{{ viewRecord.evaluation || '—' }}</dd></div>
+      </template>
+      <template v-else>
+        <div><dt>床位</dt><dd>{{ viewRecord.bed_label || '尚未分配' }}</dd></div>
+        <div><dt>状态</dt><dd>{{ d.statusLabels[viewRecord.status] }}</dd></div>
+        <div><dt>入住时间</dt><dd>{{ d.date(viewRecord.check_in_at) }}</dd></div>
+        <div><dt>退宿申请</dt><dd>{{ d.date(viewRecord.checkout_requested_at) }}</dd></div>
+        <div><dt>退宿时间</dt><dd>{{ d.date(viewRecord.check_out_at) }}</dd></div>
+      </template>
+    </dl>
+  </a-modal>
 </template>

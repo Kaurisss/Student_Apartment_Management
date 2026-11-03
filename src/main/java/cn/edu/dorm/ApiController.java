@@ -22,6 +22,14 @@ public class ApiController {
     }
     @GetMapping("/csrf") Map<String,String> csrf(CsrfToken token) { return Map.of("token", token.getToken(), "headerName", token.getHeaderName()); }
     @GetMapping("/session") Map<String,Object> session(Authentication a) { return Map.of("username",a.getName(),"admin",isAdmin(a)); }
+    @GetMapping("/profile") Map<String,Object> profile(Authentication a) {
+        if (isAdmin(a)) throw new IllegalArgumentException("管理员请在账号管理中维护资料");
+        return business.profile(a.getName());
+    }
+    @PutMapping("/profile") void updateProfile(@RequestBody Map<String,Object> data, Authentication a) {
+        if (isAdmin(a)) throw new IllegalArgumentException("管理员请在账号管理中维护资料");
+        business.updateProfile(a.getName(), Objects.toString(data.get("name"),""), Objects.toString(data.get("student_no"),""), data.get("password")==null ? null : data.get("password").toString());
+    }
     @GetMapping("/admin/statistics") Map<String,Object> statistics() { return business.statistics(); }
     @GetMapping("/admin/{entity:users|students|dormitories|beds}") Map<String,Object> adminList(@PathVariable String entity,@RequestParam(defaultValue="1") int page) {
         return Map.of("meta",admin.entity(entity),"data",admin.list(entity,page));

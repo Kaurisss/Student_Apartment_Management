@@ -27,7 +27,8 @@ const showEditor = ref(false), editId = ref(null), form = reactive({}), formRef 
 const showEvaluate = ref(false), evaluateId = ref(null), evaluation = ref('')
 const showAssign = ref(false), assignId = ref(null), selectedBed = ref(undefined)
 const adminKeys = ['students', 'dormitories', 'beds', 'users']
-const labels = { statistics:'数据概览', repairs:'报修管理', housing:'入住与退宿', students:'学生管理', dormitories:'宿舍管理', beds:'床位管理', users:'账号管理' }
+const profile = reactive({ username:'', student_no:'', name:'', password:'' })
+const labels = { statistics:'数据概览', profile:'个人信息', repairs:'报修管理', housing:'入住与退宿', students:'学生管理', dormitories:'宿舍管理', beds:'床位管理', users:'账号管理' }
 const statusLabels = { WAITING:'待受理', IN_PROGRESS:'处理中', COMPLETED:'已完成', CONFIRMED:'已确认', PENDING:'待审核', ASSIGNED:'已分配', CHECKED_IN:'已入住', CHECKED_OUT:'已退宿', FREE:'空闲', OCCUPIED:'已占用' }
 const admin = computed(() => !!user.value?.admin)
 const title = computed(() => current.value === 'repairs' && !admin.value ? '我的报修' : current.value === 'housing' && !admin.value ? '我的入住' : labels[current.value] || '')
@@ -94,6 +95,7 @@ async function request(url, { method = 'GET', data, formData = false } = {}) {
 function homeName() { return admin.value ? 'statistics' : 'repairs' }
 function routeAllowed(name) {
   if (!labels[name]) return false
+  if (name === 'profile') return !admin.value
   return admin.value || (name !== 'statistics' && !adminKeys.includes(name))
 }
 async function initialize() {
@@ -120,6 +122,11 @@ async function load() {
   try {
     if (!labels[current.value]) return
     if (current.value === 'statistics') { stats.value = await request('/admin/statistics'); return }
+    if (current.value === 'profile') {
+      const data = await request('/profile')
+      profile.username = data.username; profile.student_no = data.student_no; profile.name = data.name; profile.password = ''
+      return
+    }
     if (current.value === 'repairs') {
       const query = new URLSearchParams({ page: page.value })
       if (repairFilter.keyword.trim()) query.set('keyword', repairFilter.keyword.trim())
@@ -134,6 +141,15 @@ async function load() {
     if (adminKeys.includes(current.value)) { meta.value = data.meta; result.value = data.data } else result.value = data
     page.value = result.value.page
   } catch (e) { Message.error(e.message) } finally { busy.value = false }
+}
+async function saveProfile({ errors }) {
+  if (errors) return
+  if (profile.password && (profile.password.length < 6 || profile.password.length > 100)) return Message.warning('密码长度须为6至100个字符')
+  saving.value = true
+  try {
+    await request('/profile', { method:'PUT', data:{ name:profile.name, student_no:profile.student_no, password:profile.password } })
+    profile.password = ''; Message.success('保存成功')
+  } catch (e) { Message.error(e.message) } finally { saving.value = false }
 }
 async function navigate(key) {
   drawerOpen.value = false
@@ -197,9 +213,9 @@ watch(() => route.name, (name, previous) => {
   load()
 })
 provide('desk', reactive({
-  title, current, admin, adminKeys, stats, columns, result, pagination, busy,
+  title, current, admin, adminKeys, stats, columns, result, pagination, busy, saving, profile,
   dormColumns, dormRows, dormPagination, repairStates, statusLabels, repairFilter,
-  openEditor, changePage, applyFilters, rate, percentage, date, tagColor, remove, action, openEvaluation, openAssign
+  openEditor, changePage, applyFilters, saveProfile, rate, percentage, date, tagColor, remove, action, openEvaluation, openAssign
 }))
 onMounted(() => {
   mobileQuery = window.matchMedia('(max-width: 767px)')

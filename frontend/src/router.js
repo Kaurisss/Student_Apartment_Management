@@ -8,6 +8,7 @@ export const router = createRouter({
     { path: '/dashboard', name: 'statistics', component: Page },
     { path: '/repairs', name: 'repairs', component: Page },
     { path: '/housing', name: 'housing', component: Page },
+    { path: '/profile', name: 'profile', component: Page },
     { path: '/students', name: 'students', component: Page },
     { path: '/dormitories', name: 'dormitories', component: Page },
     { path: '/beds', name: 'beds', component: Page },
