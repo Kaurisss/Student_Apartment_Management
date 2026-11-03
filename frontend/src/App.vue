@@ -1,61 +1,26 @@
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { Grid, message, Modal } from 'ant-design-vue'
-import { PhList, PhPlus } from '@phosphor-icons/vue'
+import { ref, reactive, computed, provide, watch, onMounted, onUnmounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Message, Modal } from '@arco-design/web-vue'
+import zhCN from '@arco-design/web-vue/es/locale/lang/zh-cn'
+import { PhList } from '@phosphor-icons/vue'
 import AppNavigation from './components/AppNavigation.vue'
 
-const theme = {
-  token: {
-    colorPrimary: '#1E4D3A',
-    colorPrimaryHover: '#173D2E',
-    colorPrimaryActive: '#123226',
-    colorInfo: '#1E4D3A',
-    colorLink: '#1E4D3A',
-    colorError: '#8F3D32',
-    colorText: '#1A1916',
-    colorTextSecondary: '#3F3D38',
-    colorTextTertiary: '#6F6B64',
-    colorBorder: '#D4D0C6',
-    colorBorderSecondary: '#E3E0D8',
-    colorBgLayout: '#F3F1EC',
-    colorBgContainer: '#FFFFFF',
-    borderRadius: 4,
-    borderRadiusLG: 4,
-    borderRadiusSM: 2,
-    fontFamily: '"PingFang SC", "Hiragino Sans GB", "Noto Sans CJK SC", "Source Han Sans SC", "Microsoft YaHei", sans-serif',
-    fontSize: 14,
-    controlOutline: 'rgba(30, 77, 58, 0.16)',
-    controlHeight: 36
-  },
-  components: {
-    Menu: {
-      itemSelectedBg: '#E7EFE9',
-      itemSelectedColor: '#1E4D3A',
-      itemHoverBg: '#F6F5F1',
-      itemBorderRadius: 4,
-      itemHeight: 40,
-      groupTitleColor: '#6F6B64',
-      groupTitleFontSize: 12
-    },
-    Button: { primaryShadow: 'none', defaultShadow: 'none', dangerShadow: 'none', borderRadius: 4 },
-    Table: {
-      headerBg: 'transparent',
-      headerColor: '#6F6B64',
-      headerSplitColor: 'transparent',
-      borderColor: '#E3E0D8',
-      rowHoverBg: '#F7F6F2',
-      cellPaddingBlock: 12,
-      cellPaddingInline: 12
-    },
-    Tag: { defaultBg: '#F3F1EC', defaultColor: '#3F3D38' }
-  }
-}
-const screens = Grid.useBreakpoint()
-const isMobile = computed(() => !screens.value.md)
+const route = useRoute()
+const router = useRouter()
+
+const isMobile = ref(false)
 const drawerOpen = ref(false)
-watch(isMobile, mobile => { if (!mobile) drawerOpen.value = false })
-const user = ref(null), current = ref('statistics'), busy = ref(false), saving = ref(false)
+let mobileQuery
+function syncMobile() {
+  isMobile.value = mobileQuery.matches
+  if (!isMobile.value) drawerOpen.value = false
+}
+const user = ref(null), busy = ref(false), saving = ref(false)
+const current = computed(() => route.name || 'home')
 const csrf = ref({}), login = reactive({ username: '', password: '' })
+const repairFilter = reactive({ keyword: '', dorm: '', status: '' })
+let routeReady = false
 const page = ref(1), result = ref({ rows: [], total: 0 }), meta = ref({ title: '', fields: [] }), stats = ref(null)
 const students = ref([]), beds = ref([])
 const showEditor = ref(false), editId = ref(null), form = reactive({}), formRef = ref(null)
@@ -65,233 +30,257 @@ const adminKeys = ['students', 'dormitories', 'beds', 'users']
 const labels = { statistics:'数据概览', repairs:'报修管理', housing:'入住与退宿', students:'学生管理', dormitories:'宿舍管理', beds:'床位管理', users:'账号管理' }
 const statusLabels = { WAITING:'待受理', IN_PROGRESS:'处理中', COMPLETED:'已完成', CONFIRMED:'已确认', PENDING:'待审核', ASSIGNED:'已分配', CHECKED_IN:'已入住', CHECKED_OUT:'已退宿', FREE:'空闲', OCCUPIED:'已占用' }
 const admin = computed(() => !!user.value?.admin)
-const title = computed(() => current.value === 'repairs' && !admin.value ? '我的报修' : current.value === 'housing' && !admin.value ? '我的入住' : labels[current.value])
-const pagination = computed(() => ({ current:page.value, pageSize:10, total:result.value.total, showSizeChanger:false, showTotal: total => `共 ${total} 条` }))
+const title = computed(() => current.value === 'repairs' && !admin.value ? '我的报修' : current.value === 'housing' && !admin.value ? '我的入住' : labels[current.value] || '')
+const pagination = computed(() => ({ current:page.value, pageSize:10, total:result.value.total, showTotal:true, showPageSize:false }))
 const studentOptions = computed(() => students.value.map(s => ({ value:String(s.id), label:s.label })))
 const bedOptions = computed(() => beds.value.map(b => ({ value:String(b.id), label:b.label })))
+const editorTitle = computed(() => (editId.value ? '编辑' : current.value === 'repairs' || current.value === 'housing' ? '提交' : '新增') + (adminKeys.includes(current.value) ? meta.value.title : current.value === 'repairs' ? '报修' : '入住申请'))
+const dormRows = computed(() => (stats.value?.dorms || []).map(item => ({ ...item, key: item.building + item.room_no })))
 const rules = computed(() => {
   const r = {}
   if (adminKeys.includes(current.value)) for (const f of meta.value.fields || []) {
     const required = f.required || (f.name === 'password' && !editId.value)
-    r[f.name] = [{ required, message:`请填写${f.label}`, trigger: f.type === 'select' ? 'change' : 'blur' }]
-    if(f.name === 'password') r[f.name].push({ min:6, max:100, message:'密码长度须为6至100个字符', trigger:'blur' })
+    r[f.name] = [{ required, message:`请填写${f.label}` }]
+    if (f.name === 'password' && (!editId.value || form.password)) r[f.name].push({ minLength:6, maxLength:100, message:'密码长度须为6至100个字符' })
   }
-  if(current.value === 'repairs') {
-    r.description = [{ required:true, whitespace:true, message:'请输入故障描述', trigger:'blur' }]
-    if(admin.value && !editId.value) r.studentId = [{ required:true, message:'请选择学生', trigger:'change' }]
+  if (current.value === 'repairs') {
+    r.description = [{ validator:(value, callback) => { if (!String(value ?? '').trim()) callback('请输入故障描述') } }]
+    if (admin.value && !editId.value) r.studentId = [{ required:true, message:'请选择学生' }]
   }
-  if(current.value === 'housing' && admin.value) r.studentId = [{ required:true, message:'请选择学生', trigger:'change' }]
+  if (current.value === 'housing' && admin.value) r.studentId = [{ required:true, message:'请选择学生' }]
   return r
 })
 const columns = computed(() => {
+  const cell = column => ({ ...column, slotName:'cell' })
   if (adminKeys.includes(current.value)) {
-    const fields = (meta.value.fields || []).filter(f => f.name !== 'password').map(f => ({title:f.label, key:f.name, dataIndex:f.name}))
-    return [{title:'编号',dataIndex:'id',key:'id'}, ...fields, ...(current.value === 'beds' ? [{title:'状态',dataIndex:'status',key:'status'}] : []), {title:'操作',key:'actions',width:150}]
+    const fields = (meta.value.fields || []).filter(f => f.name !== 'password').map(f => cell({ title:f.label, key:f.name, dataIndex:f.name }))
+    return [cell({ title:'编号', dataIndex:'id', key:'id' }), ...fields, ...(current.value === 'beds' ? [cell({ title:'状态', dataIndex:'status', key:'status' })] : []), cell({ title:'操作', key:'actions', width:150 })]
   }
-  if(current.value === 'repairs') return [
-    {title:'编号',dataIndex:'id',key:'id'}, ...(admin.value?[{title:'学生',key:'student'}]:[]),
-    {title:'故障描述',dataIndex:'description',key:'description',width:250}, {title:'提交时间',dataIndex:'created_at',key:'created_at'},
-    {title:'状态',dataIndex:'status',key:'status'}, {title:'评价',dataIndex:'evaluation',key:'evaluation',width:200}, {title:'操作',key:'actions',width:220}
+  if (current.value === 'repairs') return [
+    cell({ title:'编号', dataIndex:'id', key:'id' }), ...(admin.value ? [cell({ title:'学生', key:'student' })] : []),
+    cell({ title:'所在宿舍', dataIndex:'dorm_label', key:'dorm', width:120 }),
+    cell({ title:'故障描述', dataIndex:'description', key:'description', width:250 }), cell({ title:'提交时间', dataIndex:'created_at', key:'created_at' }),
+    cell({ title:'状态', dataIndex:'status', key:'status' }), cell({ title:'评价', dataIndex:'evaluation', key:'evaluation', width:200 }), cell({ title:'操作', key:'actions', width:220 })
   ]
-  return [{title:'编号',dataIndex:'id',key:'id'}, ...(admin.value?[{title:'学生',key:'student'}]:[]),
-    {title:'床位',dataIndex:'bed_label',key:'bed_label'}, {title:'状态',dataIndex:'status',key:'status'},
-    {title:'入住时间',dataIndex:'check_in_at',key:'check_in_at'}, {title:'退宿申请',dataIndex:'checkout_requested_at',key:'checkout_requested_at'},
-    {title:'退宿时间',dataIndex:'check_out_at',key:'check_out_at'}, {title:'操作',key:'actions',width:180}]
+  return [cell({ title:'编号', dataIndex:'id', key:'id' }), ...(admin.value ? [cell({ title:'学生', key:'student' })] : []),
+    cell({ title:'床位', dataIndex:'bed_label', key:'bed_label' }), cell({ title:'状态', dataIndex:'status', key:'status' }),
+    cell({ title:'入住时间', dataIndex:'check_in_at', key:'check_in_at' }), cell({ title:'退宿申请', dataIndex:'checkout_requested_at', key:'checkout_requested_at' }),
+    cell({ title:'退宿时间', dataIndex:'check_out_at', key:'check_out_at' }), cell({ title:'操作', key:'actions', width:180 })]
 })
-const dormColumns = [{title:'楼栋',dataIndex:'building'}, {title:'宿舍',dataIndex:'room_no'}, {title:'已占用',dataIndex:'occupied'}, {title:'床位总数',dataIndex:'total'}, {title:'入住率',key:'rate'}]
+const dormColumns = [
+  { title:'楼栋', dataIndex:'building' }, { title:'宿舍', dataIndex:'room_no', width:88 },
+  { title:'已占用', dataIndex:'occupied', width:88 }, { title:'床位总数', dataIndex:'total', width:96 },
+  { title:'入住率', dataIndex:'rate', slotName:'rate', width:160 }
+]
+const dormPagination = { pageSize:10, showPageSize:false, showTotal:true }
 const repairStates = computed(() => ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CONFIRMED'].map(status => ({
   status, total: stats.value?.repairStates.find(item => item.status === status)?.total ?? 0
 })))
 function percentage(n, total) { return total ? Math.min(100, Math.max(0, Number((Number(n) * 100 / Number(total)).toFixed(1)))) : 0 }
 function rate(n, total) { return `${percentage(n, total).toFixed(1)}%` }
-function date(value) { return value ? String(value).replace('T', ' ').slice(0,16) : '—' }
-async function token() { const r = await fetch('/api/csrf', {credentials:'same-origin'}); if(!r.ok) throw Error('无法获取安全令牌'); csrf.value = await r.json() }
-async function request(url, { method='GET', data, formData=false }={}) {
+function date(value) { return value ? String(value).replace('T', ' ').slice(0, 16) : '—' }
+function filterOption(input, option) { return String(option.label).toLowerCase().includes(input.toLowerCase()) }
+function tagColor(status) { return ['CONFIRMED', 'CHECKED_IN', 'FREE'].includes(status) ? 'green' : ['WAITING', 'PENDING'].includes(status) ? 'orangered' : 'gray' }
+async function token() { const r = await fetch('/api/csrf', { credentials:'same-origin' }); if (!r.ok) throw Error('无法获取安全令牌'); csrf.value = await r.json() }
+async function request(url, { method = 'GET', data, formData = false } = {}) {
   const headers = {}
-  if(method !== 'GET') headers[csrf.value.headerName || 'X-CSRF-TOKEN'] = csrf.value.token || ''
-  if(data !== undefined) headers['Content-Type'] = formData ? 'application/x-www-form-urlencoded' : 'application/json'
+  if (method !== 'GET') headers[csrf.value.headerName || 'X-CSRF-TOKEN'] = csrf.value.token || ''
+  if (data !== undefined) headers['Content-Type'] = formData ? 'application/x-www-form-urlencoded' : 'application/json'
   const response = await fetch('/api' + url, { method, headers, credentials:'same-origin', body:data === undefined ? undefined : formData ? new URLSearchParams(data) : JSON.stringify(data) })
-  if(!response.ok) { let error; try { error = await response.json() } catch { /* 403 等空响应 */ } throw new Error(error?.message || (response.status === 401 ? '请先登录' : response.status === 403 ? '没有操作权限' : '请求失败，请重试')) }
-  if(response.status === 204 || response.headers.get('content-length') === '0') return null
+  if (!response.ok) { let error; try { error = await response.json() } catch { /* 403 等空响应 */ } throw new Error(error?.message || (response.status === 401 ? '请先登录' : response.status === 403 ? '没有操作权限' : '请求失败，请重试')) }
+  if (response.status === 204 || response.headers.get('content-length') === '0') return null
   const body = await response.text(); return body ? JSON.parse(body) : null
 }
-async function initialize() { try { await token(); user.value = await request('/session'); current.value = admin.value?'statistics':'repairs'; await load() } catch { user.value = null } }
+function homeName() { return admin.value ? 'statistics' : 'repairs' }
+function routeAllowed(name) {
+  if (!labels[name]) return false
+  return admin.value || (name !== 'statistics' && !adminKeys.includes(name))
+}
+async function initialize() {
+  try {
+    await token(); user.value = await request('/session')
+    if (!routeAllowed(route.name)) await router.replace({ name: homeName() })
+    routeReady = true; await load()
+  } catch { user.value = null }
+}
+function submitLogin({ errors }) { if (!errors) doLogin() }
 async function doLogin() {
-  saving.value=true
-  try { await request('/login',{method:'POST',data:login,formData:true}); await token(); user.value=await request('/session'); current.value=admin.value?'statistics':'repairs'; page.value=1; login.password=''; await load() }
-  catch(e) { message.error(e.message); await token() } finally { saving.value=false }
+  saving.value = true
+  try {
+    await request('/login', { method:'POST', data:login, formData:true }); await token(); user.value = await request('/session')
+    page.value = 1; login.password = ''; routeReady = true
+    if (route.name !== homeName()) await router.replace({ name: homeName() })
+    else await load()
+  }
+  catch (e) { Message.error(e.message); await token() } finally { saving.value = false }
 }
-async function logout() { try { await request('/logout',{method:'POST'}); drawerOpen.value=false; user.value=null; await token() } catch(e) { message.error(e.message) } }
+async function logout() { try { await request('/logout', { method:'POST' }); drawerOpen.value = false; user.value = null; await token() } catch (e) { Message.error(e.message) } }
 async function load() {
-  busy.value=true
+  busy.value = true
   try {
-    if(current.value === 'statistics') { stats.value = await request('/admin/statistics'); return }
-    const resource = adminKeys.includes(current.value) ? '/admin/'+current.value : '/'+current.value
-    const data = await request(resource+'?page='+page.value)
-    if(adminKeys.includes(current.value)) { meta.value=data.meta; result.value=data.data } else result.value=data
-    page.value=result.value.page
-  } catch(e) { message.error(e.message) } finally { busy.value=false }
+    if (!labels[current.value]) return
+    if (current.value === 'statistics') { stats.value = await request('/admin/statistics'); return }
+    if (current.value === 'repairs') {
+      const query = new URLSearchParams({ page: page.value })
+      if (repairFilter.keyword.trim()) query.set('keyword', repairFilter.keyword.trim())
+      if (repairFilter.dorm.trim()) query.set('dorm', repairFilter.dorm.trim())
+      if (repairFilter.status) query.set('status', repairFilter.status)
+      result.value = await request('/repairs?' + query)
+      page.value = result.value.page
+      return
+    }
+    const resource = adminKeys.includes(current.value) ? '/admin/' + current.value : '/' + current.value
+    const data = await request(resource + '?page=' + page.value)
+    if (adminKeys.includes(current.value)) { meta.value = data.meta; result.value = data.data } else result.value = data
+    page.value = result.value.page
+  } catch (e) { Message.error(e.message) } finally { busy.value = false }
 }
-async function navigate(key) { drawerOpen.value=false; current.value=key; page.value=1; await load() }
-function changePage(p) { page.value=p.current; load() }
-function resetForm() { for(const key of Object.keys(form)) delete form[key]; editId.value=null }
-async function openEditor(record=null) {
-  resetForm(); editId.value=record?.id || null
+async function navigate(key) {
+  drawerOpen.value = false
+  if (route.name !== key) await router.push({ name: key })
+}
+function changePage(next) { page.value = next; load() }
+function applyFilters() { page.value = 1; load() }
+function resetForm() { for (const key of Object.keys(form)) delete form[key]; editId.value = null }
+async function openEditor(record = null) {
+  resetForm(); editId.value = record?.id || null
   try {
-    if(adminKeys.includes(current.value)) {
-      if(record) Object.assign(form, await request('/admin/'+current.value+'/'+record.id))
-      for(const f of meta.value.fields) if(form[f.name] != null) form[f.name]=String(form[f.name])
-    } else if(current.value === 'repairs') {
-      if(record) Object.assign(form, await request('/repairs/'+record.id))
-      if(admin.value && !record) students.value = await request('/admin/options/students')
-    } else if(current.value === 'housing' && admin.value) students.value = await request('/admin/options/students')
-    showEditor.value=true
-  } catch(e) { message.error(e.message) }
+    if (adminKeys.includes(current.value)) {
+      if (record) Object.assign(form, await request('/admin/' + current.value + '/' + record.id))
+      for (const f of meta.value.fields) if (form[f.name] != null) form[f.name] = String(form[f.name])
+    } else if (current.value === 'repairs') {
+      if (record) Object.assign(form, await request('/repairs/' + record.id))
+      if (admin.value && !record) students.value = await request('/admin/options/students')
+    } else if (current.value === 'housing' && admin.value) students.value = await request('/admin/options/students')
+    showEditor.value = true
+  } catch (e) { Message.error(e.message) }
 }
 async function saveEditor() {
-  try { await formRef.value?.validate() } catch { return }
-  saving.value=true
+  const errors = await formRef.value?.validate()
+  if (errors) return false
+  saving.value = true
   try {
-    if(adminKeys.includes(current.value)) {
-      const body={}; for(const f of meta.value.fields) body[f.name]=String(form[f.name] ?? '')
-      await request('/admin/'+current.value+(editId.value?'/'+editId.value:''),{method:editId.value?'PUT':'POST',data:body})
-    } else if(current.value==='repairs') {
-      await request('/repairs'+(editId.value?'/'+editId.value:''),{method:editId.value?'PUT':'POST',data:{description:form.description,studentId:form.studentId}})
-    } else await request('/housing',{method:'POST',data:{studentId:form.studentId}})
-    showEditor.value=false; message.success('保存成功'); await load()
-  } catch(e) { message.error(e.message) } finally { saving.value=false }
+    if (adminKeys.includes(current.value)) {
+      const body = {}; for (const f of meta.value.fields) body[f.name] = String(form[f.name] ?? '')
+      await request('/admin/' + current.value + (editId.value ? '/' + editId.value : ''), { method:editId.value ? 'PUT' : 'POST', data:body })
+    } else if (current.value === 'repairs') {
+      await request('/repairs' + (editId.value ? '/' + editId.value : ''), { method:editId.value ? 'PUT' : 'POST', data:{ description:form.description, studentId:form.studentId } })
+    } else await request('/housing', { method:'POST', data:{ studentId:form.studentId } })
+    Message.success('保存成功'); await load(); return true
+  } catch (e) { Message.error(e.message); return false } finally { saving.value = false }
 }
 function remove(record) {
-  Modal.confirm({title:'确定删除这条记录吗？', okText:'删除', cancelText:'取消', okType:'danger', async onOk() {
-    try { const resource=adminKeys.includes(current.value)?'/admin/'+current.value:'/'+current.value; await request(resource+'/'+record.id,{method:'DELETE'}); message.success('删除成功'); await load() } catch(e) { message.error(e.message) }
-  }})
+  Modal.confirm({ title:'确定删除这条记录吗？', content:'', okText:'删除', cancelText:'取消', okButtonProps:{ status:'danger' }, async onOk() {
+    try { const resource = adminKeys.includes(current.value) ? '/admin/' + current.value : '/' + current.value; await request(resource + '/' + record.id, { method:'DELETE' }); Message.success('删除成功'); await load() } catch (e) { Message.error(e.message) }
+  } })
 }
-async function action(type,id,action,data={}) {
-  try { await request('/'+type+'/'+id+'/'+action,{method:'POST',data}); message.success('操作成功'); await load(); return true } catch(e) { message.error(e.message); return false }
+async function action(type, id, name, data = {}) {
+  try { await request('/' + type + '/' + id + '/' + name, { method:'POST', data }); Message.success('操作成功'); await load(); return true } catch (e) { Message.error(e.message); return false }
 }
-function openEvaluation(id) { evaluateId.value=id; evaluation.value=''; showEvaluate.value=true }
+function openEvaluation(id) { evaluateId.value = id; evaluation.value = ''; showEvaluate.value = true }
 async function submitEvaluation() {
-  if(!evaluation.value.trim()) return message.warning('请填写评价')
-  saving.value=true; if(await action('repairs',evaluateId.value,'confirm',{evaluation:evaluation.value})) showEvaluate.value=false; saving.value=false
+  if (!evaluation.value.trim()) { Message.warning('请填写评价'); return false }
+  saving.value = true
+  try { if (await action('repairs', evaluateId.value, 'confirm', { evaluation:evaluation.value })) return true; return false }
+  finally { saving.value = false }
 }
-async function openAssign(id) { try { beds.value=await request('/admin/options/free-beds'); selectedBed.value=undefined; assignId.value=id; showAssign.value=true } catch(e) { message.error(e.message) } }
+async function openAssign(id) { try { beds.value = await request('/admin/options/free-beds'); selectedBed.value = undefined; assignId.value = id; showAssign.value = true } catch (e) { Message.error(e.message) } }
 async function submitAssign() {
-  if(!selectedBed.value) return message.warning('请选择空床位')
-  saving.value=true; if(await action('housing',assignId.value,'assign',{bedId:selectedBed.value})) showAssign.value=false; saving.value=false
+  if (!selectedBed.value) { Message.warning('请选择空床位'); return false }
+  saving.value = true
+  try { if (await action('housing', assignId.value, 'assign', { bedId:selectedBed.value })) return true; return false }
+  finally { saving.value = false }
 }
-onMounted(initialize)
+watch(() => route.name, (name, previous) => {
+  if (!routeReady || !previous || name === previous) return
+  page.value = 1
+  load()
+})
+provide('desk', reactive({
+  title, current, admin, adminKeys, stats, columns, result, pagination, busy,
+  dormColumns, dormRows, dormPagination, repairStates, statusLabels, repairFilter,
+  openEditor, changePage, applyFilters, rate, percentage, date, tagColor, remove, action, openEvaluation, openAssign
+}))
+onMounted(() => {
+  mobileQuery = window.matchMedia('(max-width: 767px)')
+  syncMobile()
+  mobileQuery.addEventListener('change', syncMobile)
+  initialize()
+})
+onUnmounted(() => mobileQuery?.removeEventListener('change', syncMobile))
 </script>
 
 <template>
-  <a-config-provider :theme="theme" :auto-insert-space-in-button="false">
-  <div v-if="!user" class="login-wrap">
-    <section class="login-aside">
-      <div class="login-aside-inner">
-        <h1>学生公寓管理系统</h1>
-        <div class="login-rule" aria-hidden="true"></div>
-        <p class="login-aside-copy">床位分配、报修处理、入住与退宿。</p>
-      </div>
-    </section>
-    <main class="login-main">
-      <div class="login-form">
-        <h2>登录</h2>
-        <p class="login-subtitle">使用分配的账号进入系统</p>
-        <a-form :model="login" layout="vertical" @finish="doLogin">
-          <a-form-item label="用户名" name="username" :rules="[{required:true,message:'请输入用户名'}]"><a-input v-model:value="login.username" size="large" maxlength="50" autocomplete="username" /></a-form-item>
-          <a-form-item label="密码" name="password" :rules="[{required:true,message:'请输入密码'}]"><a-input-password v-model:value="login.password" size="large" maxlength="100" autocomplete="current-password" /></a-form-item>
-          <a-button type="primary" size="large" html-type="submit" block :loading="saving">登录</a-button>
-        </a-form>
-      </div>
-    </main>
-  </div>
-  <a-layout v-else class="app-layout">
-    <a-layout-sider v-if="!isMobile" class="sider" :width="228">
-      <AppNavigation :user="user" :current="current" @navigate="navigate" @logout="logout" />
-    </a-layout-sider>
-    <a-layout class="main-layout">
-      <a-layout-header v-if="isMobile" class="mobile-header">
-        <a-button type="text" class="menu-toggle" aria-label="打开导航" @click="drawerOpen = true">
-          <template #icon><PhList :size="22" /></template>
-        </a-button>
-        <span class="mobile-brand">学生公寓</span>
-        <a-avatar class="user-avatar" :size="32">{{ user.username.charAt(0).toUpperCase() }}</a-avatar>
-      </a-layout-header>
-      <a-drawer :open="isMobile && drawerOpen" placement="left" :width="280" :closable="false"
-        :body-style="{ padding: 0 }" @close="drawerOpen = false">
-        <AppNavigation :user="user" :current="current" drawer @navigate="navigate" @logout="logout" @close="drawerOpen = false" />
-      </a-drawer>
-    <a-layout-content class="content">
-      <div class="page-header"><h1>{{ title }}</h1>
-        <a-button v-if="current !== 'statistics'" type="primary" @click="openEditor()"><template #icon><PhPlus :size="16" /></template>{{ current === 'repairs' ? '提交报修' : current === 'housing' ? '入住申请' : '新增' }}</a-button>
-      </div>
-      <template v-if="current === 'statistics'">
-        <a-skeleton v-if="!stats" active />
-        <template v-else>
-          <a-row :gutter="[16, 16]" class="metrics">
-            <a-col :xs="24" :sm="12" :lg="12">
-              <a-card class="metric-card">
-                <div class="metric-label">床位入住率</div>
-                <div class="metric-value">{{ rate(stats.beds.occupied, stats.beds.total) }}</div>
-                <a-progress :percent="percentage(stats.beds.occupied, stats.beds.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
-                <div class="metric-detail">已占用 <strong>{{ stats.beds.occupied }}</strong> / {{ stats.beds.total }} 个床位</div>
-              </a-card>
-            </a-col>
-            <a-col :xs="24" :sm="12" :lg="12">
-              <a-card class="metric-card">
-                <div class="metric-label">报修处理率</div>
-                <div class="metric-value">{{ rate(stats.repairs.done, stats.repairs.total) }}</div>
-                <a-progress :percent="percentage(stats.repairs.done, stats.repairs.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
-                <div class="metric-detail">已完成或确认 <strong>{{ stats.repairs.done }}</strong> / {{ stats.repairs.total }} 单</div>
-              </a-card>
-            </a-col>
-          </a-row>
-          <a-card title="各宿舍床位" class="section dorm-card">
-            <a-table :columns="dormColumns" :data-source="stats.dorms" :pagination="{pageSize:10,showSizeChanger:false}"
-              :row-key="r => r.building + r.room_no" :scroll="{ x: 'max-content' }" size="middle">
-              <template #bodyCell="{column,record}">
-                <div v-if="column.key === 'rate'" class="table-rate">
-                  <a-progress :percent="percentage(record.occupied, record.total)" :show-info="false" :stroke-width="4" stroke-linecap="square" stroke-color="#1E4D3A" trail-color="#E3E0D8" />
-                  <span>{{ rate(record.occupied, record.total) }}</span>
-                </div>
-              </template>
-            </a-table>
-          </a-card>
-          <a-card title="报修状态" class="section state-card">
-            <div class="state-strip">
-              <div v-for="item in repairStates" :key="item.status" class="state-tile">
-                <div class="state-label">{{ statusLabels[item.status] }}</div>
-                <div class="state-count">{{ item.total }}<span>单</span></div>
-              </div>
-            </div>
-          </a-card>
-        </template>
-      </template>
-      <a-card v-else class="section table-card"><a-table :columns="columns" :data-source="result.rows" :pagination="pagination" :loading="busy" row-key="id" size="middle" :scroll="{x:'max-content'}" @change="changePage">
-        <template #bodyCell="{column,record,text}">
-          <template v-if="column.key === 'student'">{{ record.student_no }} {{ record.student_name }}</template>
-          <template v-else-if="column.key === 'status'"><a-tag :color="['CONFIRMED','CHECKED_IN','FREE'].includes(record.status) ? 'green' : ['IN_PROGRESS','ASSIGNED'].includes(record.status) ? 'blue' : undefined">{{ statusLabels[record.status] }}</a-tag></template>
-          <template v-else-if="['created_at','check_in_at','checkout_requested_at','check_out_at'].includes(column.key)">{{ date(text) }}</template>
-          <template v-else-if="column.key === 'actions'"><div class="actions">
-            <template v-if="adminKeys.includes(current)"><a @click="openEditor(record)">编辑</a><a class="danger" @click="remove(record)">删除</a></template>
-            <template v-else-if="current === 'repairs'"><template v-if="record.status === 'WAITING'"><a @click="openEditor(record)">编辑</a><a class="danger" @click="remove(record)">删除</a><a v-if="admin" @click="action('repairs',record.id,'accept')">受理</a></template><a v-if="admin && record.status === 'IN_PROGRESS'" @click="action('repairs',record.id,'complete')">标记完成</a><a v-if="!admin && record.status === 'COMPLETED'" @click="openEvaluation(record.id)">确认评价</a></template>
-            <template v-else><template v-if="record.status === 'PENDING'"><a class="danger" @click="remove(record)">删除</a><a v-if="admin" @click="openAssign(record.id)">分配床位</a></template><a v-if="admin && record.status === 'ASSIGNED'" @click="action('housing',record.id,'checkin')">办理入住</a><a v-if="!admin && record.status === 'CHECKED_IN' && !record.checkout_requested_at" @click="action('housing',record.id,'request-checkout')">申请退宿</a><a v-if="admin && record.status === 'CHECKED_IN' && record.checkout_requested_at" @click="action('housing',record.id,'checkout')">办理退宿</a></template>
-          </div></template>
-          <template v-else-if="record[column.key + '_label']">{{ record[column.key + '_label'] }}</template>
-          <template v-else-if="column.key === 'description' || column.key === 'evaluation'"><span class="wrap-text">{{ text || '—' }}</span></template>
-          <template v-else-if="column.key === 'bed_label'">{{ text || '—' }}</template>
-          <template v-else>{{ text ?? '—' }}</template>
-        </template>
-      </a-table></a-card>
-      </a-layout-content>
+  <a-config-provider :locale="zhCN">
+    <div v-if="!user" class="login-wrap">
+      <section class="login-aside">
+        <div class="login-aside-inner">
+          <h1>学生公寓管理系统</h1>
+          <div class="login-rule" aria-hidden="true"></div>
+          <p class="login-aside-copy">床位分配、报修处理、入住与退宿。</p>
+        </div>
+      </section>
+      <main class="login-main">
+        <div class="login-form">
+          <h2>登录</h2>
+          <p class="login-subtitle">使用分配的账号进入系统</p>
+          <a-form :model="login" layout="vertical" @submit="submitLogin">
+            <a-form-item field="username" label="用户名" :rules="[{ required:true, message:'请输入用户名' }]">
+              <a-input v-model="login.username" size="large" :max-length="50" autocomplete="username" />
+            </a-form-item>
+            <a-form-item field="password" label="密码" :rules="[{ required:true, message:'请输入密码' }]">
+              <a-input-password v-model="login.password" size="large" :max-length="100" autocomplete="current-password" />
+            </a-form-item>
+            <a-button type="primary" size="large" html-type="submit" long :loading="saving">登录</a-button>
+          </a-form>
+        </div>
+      </main>
+    </div>
+    <a-layout v-else class="app-layout">
+      <a-layout-sider v-if="!isMobile" class="sider" :width="228">
+        <AppNavigation :user="user" :current="current" @navigate="navigate" @logout="logout" />
+      </a-layout-sider>
+      <a-layout class="main-layout">
+        <a-layout-header v-if="isMobile" class="mobile-header">
+          <a-button type="text" class="menu-toggle" aria-label="打开导航" @click="drawerOpen = true">
+            <template #icon><PhList :size="22" /></template>
+          </a-button>
+          <span class="mobile-brand">学生公寓</span>
+          <a-avatar class="user-avatar" :size="32" :image-url="`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(user.username)}&backgroundColor=f2f3f5&textColor=1d2129`" />
+        </a-layout-header>
+        <a-drawer v-if="isMobile && drawerOpen" :visible="true" placement="left" :width="280" :header="false" :footer="false"
+          :body-style="{ padding: 0, height: '100%' }" @cancel="drawerOpen = false">
+          <AppNavigation :user="user" :current="current" drawer @navigate="navigate" @logout="logout" @close="drawerOpen = false" />
+        </a-drawer>
+        <a-layout-content class="content">
+          <router-view />
+        </a-layout-content>
+      </a-layout>
     </a-layout>
-  </a-layout>
-  <a-modal v-model:open="showEditor" :title="(editId ? '编辑' : current === 'repairs' ? '提交' : current === 'housing' ? '提交' : '新增') + (adminKeys.includes(current) ? meta.title : current === 'repairs' ? '报修' : '入住申请')" ok-text="保存" cancel-text="取消" :confirm-loading="saving" destroy-on-close @ok="saveEditor">
-    <a-form ref="formRef" :model="form" :rules="rules" layout="vertical" class="modal-form">
-      <template v-if="adminKeys.includes(current)"><a-form-item v-for="field in meta.fields" :key="field.name" :label="field.label" :name="field.name"><a-select v-if="field.type === 'select'" v-model:value="form[field.name]" placeholder="请选择" :options="Object.entries(field.options).map(([value,label]) => ({value,label}))"/><a-input-password v-else-if="field.type === 'password'" v-model:value="form.password" :maxlength="field.max" :placeholder="editId ? '留空则不修改密码' : ''"/><a-input v-else v-model:value="form[field.name]" :maxlength="field.max" /></a-form-item></template>
-      <template v-else><a-form-item v-if="admin && !editId" label="学生" name="studentId"><a-select v-model:value="form.studentId" placeholder="请选择学生" :options="studentOptions" show-search :filter-option="(input, option) => option.label.toLowerCase().includes(input.toLowerCase())" /></a-form-item><a-form-item v-if="current === 'repairs'" label="故障描述" name="description"><a-textarea v-model:value="form.description" :rows="4" :maxlength="500" show-count /></a-form-item></template>
-    </a-form>
-  </a-modal>
-  <a-modal v-model:open="showEvaluate" title="确认并评价" ok-text="确认评价" cancel-text="取消" :confirm-loading="saving" @ok="submitEvaluation"><a-textarea v-model:value="evaluation" :rows="4" :maxlength="500" show-count placeholder="填写评价" /></a-modal>
-  <a-modal v-model:open="showAssign" title="分配床位" ok-text="分配" cancel-text="取消" :confirm-loading="saving" @ok="submitAssign"><a-select v-model:value="selectedBed" style="width:100%" placeholder="请选择空床位" :options="bedOptions" /></a-modal>
+    <a-modal v-model:visible="showEditor" :title="editorTitle" ok-text="保存" cancel-text="取消" :ok-loading="saving" unmount-on-close :on-before-ok="saveEditor">
+      <a-form ref="formRef" :model="form" :rules="rules" layout="vertical" class="modal-form">
+        <template v-if="adminKeys.includes(current)">
+          <a-form-item v-for="field in meta.fields" :key="field.name" :field="field.name" :label="field.label">
+            <a-select v-if="field.type === 'select'" v-model="form[field.name]" placeholder="请选择" :options="Object.entries(field.options).map(([value, label]) => ({ value, label }))" />
+            <a-input-password v-else-if="field.type === 'password'" v-model="form.password" :max-length="field.max" :placeholder="editId ? '留空则不修改密码' : ''" />
+            <a-input v-else v-model="form[field.name]" :max-length="field.max" />
+          </a-form-item>
+        </template>
+        <template v-else>
+          <a-form-item v-if="admin && !editId" field="studentId" label="学生">
+            <a-select v-model="form.studentId" placeholder="请选择学生" :options="studentOptions" allow-search :filter-option="filterOption" />
+          </a-form-item>
+          <a-form-item v-if="current === 'repairs'" field="description" label="故障描述">
+            <a-textarea v-model="form.description" :auto-size="{ minRows:4, maxRows:8 }" :max-length="500" show-word-limit />
+          </a-form-item>
+        </template>
+      </a-form>
+    </a-modal>
+    <a-modal v-model:visible="showEvaluate" title="确认并评价" ok-text="确认评价" cancel-text="取消" :ok-loading="saving" :on-before-ok="submitEvaluation">
+      <a-textarea v-model="evaluation" :auto-size="{ minRows:4, maxRows:8 }" :max-length="500" show-word-limit placeholder="填写评价" />
+    </a-modal>
+    <a-modal v-model:visible="showAssign" title="分配床位" ok-text="分配" cancel-text="取消" :ok-loading="saving" :on-before-ok="submitAssign">
+      <a-select v-model="selectedBed" placeholder="请选择空床位" :options="bedOptions" />
+    </a-modal>
   </a-config-provider>
 </template>

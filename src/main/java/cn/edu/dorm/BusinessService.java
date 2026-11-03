@@ -29,6 +29,29 @@ public class BusinessService {
             " FROM "+table+" x JOIN student s ON s.id=x.student_id"+(repair?"":" LEFT JOIN bed b ON b.id=x.bed_id LEFT JOIN dormitory d ON d.id=b.dormitory_id")+where+" ORDER BY x.id DESC LIMIT 10 OFFSET ?";
         return new Page(db.queryForList(sql,args.toArray()),page,pages,total);
     }
+    public Page repairs(boolean admin, String username, int requested, String keyword, String dorm, String status) {
+        StringBuilder where = new StringBuilder(admin ? " WHERE 1=1" : " WHERE x.student_id=?");
+        List<Object> args = new ArrayList<>();
+        if (!admin) args.add(studentId(username));
+        if (status != null && !status.isBlank()) {
+            if (!Set.of("WAITING", "IN_PROGRESS", "COMPLETED", "CONFIRMED").contains(status)) throw new IllegalArgumentException("状态无效");
+            where.append(" AND x.status=?"); args.add(status);
+        }
+        if (keyword != null && !keyword.isBlank()) {
+            where.append(" AND (s.name LIKE ? OR s.student_no LIKE ? OR x.description LIKE ?)");
+            String like = "%" + keyword.trim() + "%"; args.add(like); args.add(like); args.add(like);
+        }
+        if (dorm != null && !dorm.isBlank()) {
+            where.append(" AND CONCAT(IFNULL(d.building,''), ' ', IFNULL(d.room_no,'')) LIKE ?");
+            args.add("%" + dorm.trim() + "%");
+        }
+        String from = " FROM repair x JOIN student s ON s.id=x.student_id LEFT JOIN housing h ON h.active_student_id=s.id LEFT JOIN bed b ON b.id=h.bed_id LEFT JOIN dormitory d ON d.id=b.dormitory_id";
+        long total = db.queryForObject("SELECT COUNT(*)" + from + where, Long.class, args.toArray());
+        int pages = (int) Math.max(1, (total + 9) / 10), page = Math.max(1, Math.min(requested, pages));
+        args.add((page - 1) * 10);
+        String sql = "SELECT x.*, s.name AS student_name, s.student_no, CONCAT(d.building,' ',d.room_no) AS dorm_label" + from + where + " ORDER BY x.id DESC LIMIT 10 OFFSET ?";
+        return new Page(db.queryForList(sql, args.toArray()), page, pages, total);
+    }
     public Map<String,Object> repairDetail(long id,boolean admin,String username) {
         List<Map<String,Object>> records=db.queryForList("SELECT * FROM repair WHERE id=?",id);
         if (records.isEmpty()) throw new IllegalArgumentException("记录不存在");

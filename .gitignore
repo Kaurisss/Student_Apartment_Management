@@ -11,3 +11,6 @@ __pycache__/
 
 /frontend/test-results/
 /frontend/playwright-report/
+
+.pi/
+test-results/

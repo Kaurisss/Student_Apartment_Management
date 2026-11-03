@@ -18,28 +18,47 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
       <span class="brand-mark" aria-hidden="true"></span>
       <div class="brand-text"><strong>学生公寓</strong><span>管理系统</span></div>
       <a-button v-if="drawer" type="text" class="drawer-close" aria-label="关闭导航" @click="emit('close')">
-        <template #icon><PhX :size="19" /></template>
+        <template #icon><PhX :size="18" /></template>
       </a-button>
     </div>
 
-    <div class="navigation-label">工作台</div>
-    <a-menu mode="inline" :selected-keys="[current]" @click="({key}) => emit('navigate', key)">
-      <a-menu-item v-if="user.admin" key="statistics"><template #icon><PhChartBar :size="19" /></template>数据概览</a-menu-item>
-      <a-menu-item key="repairs"><template #icon><PhWrench :size="19" /></template>报修管理</a-menu-item>
-      <a-menu-item key="housing"><template #icon><PhDoorOpen :size="19" /></template>入住与退宿</a-menu-item>
-      <a-menu-item-group v-if="user.admin" title="基础信息">
-        <a-menu-item key="students"><template #icon><PhStudent :size="19" /></template>学生管理</a-menu-item>
-        <a-menu-item key="dormitories"><template #icon><PhHouseLine :size="19" /></template>宿舍管理</a-menu-item>
-        <a-menu-item key="beds"><template #icon><PhBed :size="19" /></template>床位管理</a-menu-item>
-        <a-menu-item key="users"><template #icon><PhUsers :size="19" /></template>账号管理</a-menu-item>
-      </a-menu-item-group>
-    </a-menu>
+    <div class="navigation-scroll">
+      <div class="navigation-label">工作台</div>
+      <a-menu :selected-keys="[current]" @menu-item-click="key => emit('navigate', key)">
+        <a-menu-item v-if="user.admin" key="statistics" role="menuitem">
+          <template #icon><PhChartBar :size="18" /></template>数据概览
+        </a-menu-item>
+        <a-menu-item key="repairs" role="menuitem">
+          <template #icon><PhWrench :size="18" /></template>报修管理
+        </a-menu-item>
+        <a-menu-item key="housing" role="menuitem">
+          <template #icon><PhDoorOpen :size="18" /></template>入住与退宿
+        </a-menu-item>
+      </a-menu>
+      <template v-if="user.admin">
+        <div class="navigation-label">基础信息</div>
+        <a-menu :selected-keys="[current]" @menu-item-click="key => emit('navigate', key)">
+          <a-menu-item key="students" role="menuitem">
+            <template #icon><PhStudent :size="18" /></template>学生管理
+          </a-menu-item>
+          <a-menu-item key="dormitories" role="menuitem">
+            <template #icon><PhHouseLine :size="18" /></template>宿舍管理
+          </a-menu-item>
+          <a-menu-item key="beds" role="menuitem">
+            <template #icon><PhBed :size="18" /></template>床位管理
+          </a-menu-item>
+          <a-menu-item key="users" role="menuitem">
+            <template #icon><PhUsers :size="18" /></template>账号管理
+          </a-menu-item>
+        </a-menu>
+      </template>
+    </div>
 
     <div class="navigation-footer">
-      <a-avatar class="user-avatar" :size="32">{{ user.username.charAt(0).toUpperCase() }}</a-avatar>
+      <a-avatar class="user-avatar" :size="32" :image-url="`https://api.dicebear.com/9.x/initials/svg?seed=${encodeURIComponent(user.username)}&backgroundColor=f2f3f5&textColor=1d2129`" />
       <div class="user-details"><strong>{{ user.username }}</strong><span>{{ user.admin ? '管理员' : '学生' }}</span></div>
       <a-button type="text" class="logout-button" aria-label="退出登录" title="退出登录" @click="emit('logout')">
-        <template #icon><PhSignOut :size="19" /></template>
+        <template #icon><PhSignOut :size="18" /></template>
       </a-button>
     </div>
   </nav>

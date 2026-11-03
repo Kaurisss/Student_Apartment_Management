@@ -1,6 +1,6 @@
 # 学生公寓管理系统
 
-Java Web 课程实训项目。使用 Java 17、Spring Boot 3.4、Spring Security、JDBC 和 MySQL 8.0.16+；前端使用 Vue 3、Ant Design Vue 和 @phosphor-icons/vue。数据库与作业2的六实体、字段及状态保持一致。Java 21 也可运行。前端生产文件已放入后端静态资源，直接打包运行无需 Node.js。
+Java Web 课程实训项目。使用 Java 17、Spring Boot 3.4、Spring Security、JDBC 和 MySQL 8.0.16+；前端使用 Vue 3、Vue Router、Arco Design Vue 和 @phosphor-icons/vue。数据库与作业2的六实体、字段及状态保持一致。Java 21 也可运行。前端生产文件已放入后端静态资源，直接打包运行无需 Node.js。
 
 ## 启动（Docker 数据库 + 本机 Java）
 
@@ -68,7 +68,7 @@ npm run test:ui
 - `AdminService.java`：四类基础数据的校验、分页与维护。
 - `BusinessService.java`：报修、入住状态变更，事务与行锁、统计查询。
 - `ApiController.java`：JSON 接口、参数传递及错误反馈。
-- `frontend/src/App.vue`：Vue 页面，使用 Ant Design Vue 组件和 Phosphor 图标；`frontend/src/components/AppNavigation.vue` 为桌面与移动端共用的导航；`frontend/src/style.css` 为界面样式。
+- `frontend/src/App.vue`：Vue 页面，使用 Arco Design Vue 组件和 Phosphor 图标；`frontend/src/components/AppNavigation.vue` 为桌面与移动端共用的导航；`frontend/src/style.css` 为界面样式。
 - `src/main/resources/static/`：已经构建好的前端文件，随 Java 包一起交付。
 - `sql/assignment2-original.sql`：从作业2原样提取的建库、建表和数据。
 - `docs/`：部署说明、测试与讲解提纲、AI 使用说明草稿。

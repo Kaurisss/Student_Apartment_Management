@@ -30,7 +30,9 @@ public class ApiController {
     @PostMapping("/admin/{entity:users|students|dormitories|beds}") void adminCreate(@PathVariable String entity,@RequestBody Map<String,String> data,Authentication a) { admin.save(entity,null,data,a.getName()); }
     @PutMapping("/admin/{entity:users|students|dormitories|beds}/{id}") void adminUpdate(@PathVariable String entity,@PathVariable long id,@RequestBody Map<String,String> data,Authentication a) { admin.save(entity,id,data,a.getName()); }
     @DeleteMapping("/admin/{entity:users|students|dormitories|beds}/{id}") void adminDelete(@PathVariable String entity,@PathVariable long id,Authentication a) { admin.delete(entity,id,a.getName()); }
-    @GetMapping("/repairs") BusinessService.Page repairs(@RequestParam(defaultValue="1") int page,Authentication a) { return business.list("repairs",isAdmin(a),a.getName(),page); }
+    @GetMapping("/repairs") BusinessService.Page repairs(@RequestParam(defaultValue="1") int page,@RequestParam(required=false) String keyword,@RequestParam(required=false) String dorm,@RequestParam(required=false) String status,Authentication a) {
+        return business.repairs(isAdmin(a),a.getName(),page,keyword,dorm,status);
+    }
     @GetMapping("/repairs/{id}") Map<String,Object> repairDetail(@PathVariable long id,Authentication a) { return business.repairDetail(id,isAdmin(a),a.getName()); }
     @PostMapping("/repairs") void repairCreate(@RequestBody Map<String,Object> data,Authentication a) { business.createRepair(isAdmin(a),a.getName(),id(data.get("studentId")),Objects.toString(data.get("description"),"")); }
     @PutMapping("/repairs/{id}") void repairUpdate(@PathVariable long id,@RequestBody Map<String,Object> data,Authentication a) { business.editRepair(id,isAdmin(a),a.getName(),Objects.toString(data.get("description"),"")); }
