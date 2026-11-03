@@ -1,6 +1,6 @@
 <script setup>
 import {
-  PhBed, PhBuildings, PhChartBar, PhDoorOpen, PhHouseLine,
+  PhBed, PhChartBar, PhDoorOpen, PhHouseLine,
   PhSignOut, PhStudent, PhUsers, PhWrench, PhX
 } from '@phosphor-icons/vue'
 
@@ -15,8 +15,8 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
 <template>
   <nav class="navigation" aria-label="主导航">
     <div class="navigation-brand">
-      <span class="brand-mark"><PhBuildings :size="24" weight="duotone" /></span>
-      <div class="brand-text"><strong>学生公寓</strong><span>宿舍管理系统</span></div>
+      <span class="brand-mark" aria-hidden="true"></span>
+      <div class="brand-text"><strong>学生公寓</strong><span>管理系统</span></div>
       <a-button v-if="drawer" type="text" class="drawer-close" aria-label="关闭导航" @click="emit('close')">
         <template #icon><PhX :size="19" /></template>
       </a-button>
@@ -36,7 +36,7 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
     </a-menu>
 
     <div class="navigation-footer">
-      <a-avatar class="user-avatar" :size="38">{{ user.username.charAt(0).toUpperCase() }}</a-avatar>
+      <a-avatar class="user-avatar" :size="32">{{ user.username.charAt(0).toUpperCase() }}</a-avatar>
       <div class="user-details"><strong>{{ user.username }}</strong><span>{{ user.admin ? '管理员' : '学生' }}</span></div>
       <a-button type="text" class="logout-button" aria-label="退出登录" title="退出登录" @click="emit('logout')">
         <template #icon><PhSignOut :size="19" /></template>
