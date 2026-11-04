@@ -325,6 +325,64 @@ button, input, textarea, select { font-family: inherit; }
   font-weight: 500;
 }
 
+.header-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 10px;
+}
+
+.form-guide {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  border: 1px solid #e6ddd0;
+  border-radius: 6px;
+  background: #fdf9f3;
+  color: #7a5a3a;
+  font-size: 13px;
+}
+
+.blocked-wrap {
+  display: grid;
+  place-items: center;
+  min-height: 100vh;
+  padding: 24px;
+  background: var(--paper);
+}
+
+.blocked-card.arco-card {
+  width: min(440px, 100%);
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: var(--surface);
+  box-shadow: none;
+}
+
+.blocked-card .arco-card-body { padding: 32px; }
+
+.blocked-card h2 {
+  margin: 0 0 8px;
+  color: var(--ink);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.blocked-card p {
+  margin: 0 0 24px;
+  color: var(--ink-soft);
+}
+
+.field-hint {
+  display: block;
+  margin-top: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
 /* Arco 栅格把纵向间距写成行内负边距，普通 margin 会被盖掉。 */
 .metrics { margin-bottom: 12px !important; }
 

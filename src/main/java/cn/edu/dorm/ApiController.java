@@ -21,19 +21,24 @@ public class ApiController {
         catch(NumberFormatException e) { throw new IllegalArgumentException("编号无效"); }
     }
     @GetMapping("/csrf") Map<String,String> csrf(CsrfToken token) { return Map.of("token", token.getToken(), "headerName", token.getHeaderName()); }
-    @GetMapping("/session") Map<String,Object> session(Authentication a) { return Map.of("username",a.getName(),"admin",isAdmin(a)); }
+    @GetMapping("/session") Map<String,Object> session(Authentication a) {
+        boolean admin=isAdmin(a);
+        return Map.of("username",a.getName(),"admin",admin,"studentLinked",admin||business.studentLinked(a.getName()));
+    }
     @GetMapping("/profile") Map<String,Object> profile(Authentication a) {
         if (isAdmin(a)) throw new IllegalArgumentException("管理员请在账号管理中维护资料");
         return business.profile(a.getName());
     }
     @PutMapping("/profile") void updateProfile(@RequestBody Map<String,Object> data, Authentication a) {
         if (isAdmin(a)) throw new IllegalArgumentException("管理员请在账号管理中维护资料");
-        business.updateProfile(a.getName(), Objects.toString(data.get("name"),""), Objects.toString(data.get("student_no"),""), data.get("password")==null ? null : data.get("password").toString());
+        business.updateProfile(a.getName(), Objects.toString(data.get("name"),""), Objects.toString(data.get("student_no"),""),
+            data.get("password")==null ? null : data.get("password").toString(), data.get("oldPassword")==null ? null : data.get("oldPassword").toString());
     }
     @GetMapping("/admin/statistics") Map<String,Object> statistics() { return business.statistics(); }
     @GetMapping("/admin/{entity:users|students|dormitories|beds}") Map<String,Object> adminList(@PathVariable String entity,@RequestParam(defaultValue="1") int page) {
         return Map.of("meta",admin.entity(entity),"data",admin.list(entity,page));
     }
+    @GetMapping("/admin/{entity:users|students|dormitories|beds}/form") AdminService.Entity adminForm(@PathVariable String entity,@RequestParam(required=false) Long editingId) { return admin.form(entity,editingId); }
     @GetMapping("/admin/{entity:users|students|dormitories|beds}/{id}") Map<String,Object> adminDetail(@PathVariable String entity,@PathVariable long id) { return admin.find(entity,id); }
     @PostMapping("/admin/{entity:users|students|dormitories|beds}") void adminCreate(@PathVariable String entity,@RequestBody Map<String,String> data,Authentication a) { admin.save(entity,null,data,a.getName()); }
     @PutMapping("/admin/{entity:users|students|dormitories|beds}/{id}") void adminUpdate(@PathVariable String entity,@PathVariable long id,@RequestBody Map<String,String> data,Authentication a) { admin.save(entity,id,data,a.getName()); }
@@ -49,9 +54,11 @@ public class ApiController {
         business.repairAction(id,action,isAdmin(a),a.getName(),data==null?null:Objects.toString(data.get("evaluation"),""));
     }
     @GetMapping("/housing") BusinessService.Page housing(@RequestParam(defaultValue="1") int page,Authentication a) { return business.list("housing",isAdmin(a),a.getName(),page); }
-    @PostMapping("/housing") void housingCreate(@RequestBody(required=false) Map<String,Object> data,Authentication a) { business.createHousing(isAdmin(a),a.getName(),data==null?null:id(data.get("studentId"))); }
+    @GetMapping("/housing/active") Map<String,Object> activeHousing(Authentication a) { return isAdmin(a) ? Map.of("active",false) : business.activeHousing(a.getName()); }
+    @GetMapping("/beds/free") List<Map<String,Object>> freeBeds() { return business.freeBeds(); }
+    @PostMapping("/housing") void housingCreate(@RequestBody(required=false) Map<String,Object> data,Authentication a) { business.createHousing(isAdmin(a),a.getName(),data==null?null:id(data.get("studentId")),data==null?null:id(data.get("bedId"))); }
     @DeleteMapping("/housing/{id}") void housingDelete(@PathVariable long id,Authentication a) { business.deleteHousing(id,isAdmin(a),a.getName()); }
-    @PostMapping("/housing/{id}/{action:assign|checkin|request-checkout|checkout}") void housingAction(@PathVariable long id,@PathVariable String action,@RequestBody(required=false) Map<String,Object> data,Authentication a) {
+    @PostMapping("/housing/{id}/{action:assign|unassign|checkin|request-checkout|cancel-checkout|checkout|force-checkout}") void housingAction(@PathVariable long id,@PathVariable String action,@RequestBody(required=false) Map<String,Object> data,Authentication a) {
         business.housingAction(id,action,isAdmin(a),a.getName(),data==null?null:id(data.get("bedId")));
     }
     @GetMapping("/admin/options/students") List<Map<String,Object>> students() { return business.students(); }

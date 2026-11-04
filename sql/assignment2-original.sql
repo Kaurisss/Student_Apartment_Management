@@ -76,7 +76,7 @@ CREATE TABLE housing (
   FOREIGN KEY (bed_id) REFERENCES bed(id),
   CHECK (status IN ('PENDING', 'ASSIGNED',
                     'CHECKED_IN', 'CHECKED_OUT')),
-  CHECK ((status = 'PENDING' AND bed_id IS NULL) OR
+  CHECK (status = 'PENDING' OR
     (status IN ('ASSIGNED', 'CHECKED_IN', 'CHECKED_OUT')
      AND bed_id IS NOT NULL))
 ) ENGINE=InnoDB;

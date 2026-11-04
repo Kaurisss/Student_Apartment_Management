@@ -10,7 +10,8 @@ import org.springframework.transaction.annotation.Transactional;
 public class BusinessService {
     private final JdbcTemplate db;
     private final PasswordEncoder passwords;
-    public BusinessService(JdbcTemplate db, PasswordEncoder passwords) { this.db=db; this.passwords=passwords; }
+    private final SessionService sessions;
+    public BusinessService(JdbcTemplate db, PasswordEncoder passwords, SessionService sessions) { this.db=db; this.passwords=passwords; this.sessions=sessions; }
     public record Page(List<Map<String,Object>> rows, int page, int pages, long total) {}
     public Map<String,Object> profile(String username) {
         List<Map<String,Object>> rows=db.queryForList("SELECT u.username, s.student_no, s.name FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
@@ -18,13 +19,24 @@ public class BusinessService {
         return rows.get(0);
     }
     @Transactional
-    public void updateProfile(String username, String name, String studentNo, String password) {
-        long id=studentId(username);
-        db.update("UPDATE student SET name=?, student_no=? WHERE id=?", text(name,"姓名",50), text(studentNo,"学号",30), id);
+    public void updateProfile(String username, String name, String studentNo, String password, String oldPassword) {
+        List<Map<String,Object>> rows=db.queryForList("SELECT s.id, s.student_no, u.password_hash FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
+        if (rows.isEmpty()) throw new IllegalArgumentException("该账号尚未关联学生信息，请联系管理员");
+        var current=rows.get(0);
+        long id=((Number)current.get("id")).longValue();
+        if (studentNo != null && !studentNo.isBlank() && !studentNo.trim().equals(current.get("student_no")))
+            throw new IllegalArgumentException("学号由管理员维护，请联系管理员");
+        db.update("UPDATE student SET name=? WHERE id=?", text(name,"姓名",50), id);
         if (password != null && !password.isBlank()) {
             if (password.length() < 6 || password.length() > 100) throw new IllegalArgumentException("密码长度须为6至100个字符");
+            if (oldPassword == null || oldPassword.isBlank()) throw new IllegalArgumentException("修改密码需填写原密码");
+            if (!passwords.matches(oldPassword, Objects.toString(current.get("password_hash"), ""))) throw new IllegalArgumentException("原密码不正确");
             db.update("UPDATE `user` u JOIN student s ON s.user_id=u.id SET u.password_hash=? WHERE s.id=?", passwords.encode(password), id);
+            sessions.expireOthers(username);
         }
+    }
+    public boolean studentLinked(String username) {
+        return db.queryForObject("SELECT COUNT(*) FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", Integer.class, username) > 0;
     }
     public Long studentId(String username) {
         List<Long> ids=db.query("SELECT s.id FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", (rs,n)->rs.getLong(1),username);
@@ -33,6 +45,13 @@ public class BusinessService {
     }
     public List<Map<String,Object>> students() { return db.queryForList("SELECT id, CONCAT(student_no,' ',name) AS label FROM student ORDER BY student_no"); }
     public List<Map<String,Object>> freeBeds() { return db.queryForList("SELECT b.id, CONCAT(d.building,' ',d.room_no,' / ',b.bed_no,'号床') AS label FROM bed b JOIN dormitory d ON d.id=b.dormitory_id WHERE b.status='FREE' ORDER BY d.building,d.room_no,b.bed_no"); }
+    public Map<String,Object> activeHousing(String username) {
+        List<Map<String,Object>> rows=db.queryForList("SELECT id, status FROM housing WHERE student_id=? AND status IN ('PENDING','ASSIGNED','CHECKED_IN') ORDER BY id DESC LIMIT 1", studentId(username));
+        Map<String,Object> out=new HashMap<>();
+        out.put("active", !rows.isEmpty());
+        if (!rows.isEmpty()) out.put("status", rows.get(0).get("status"));
+        return out;
+    }
     public Page list(String type, boolean admin, String username, int requested) {
         boolean repair=type.equals("repairs");
         String table=repair?"repair":"housing";
@@ -71,7 +90,7 @@ public class BusinessService {
     public Map<String,Object> repairDetail(long id,boolean admin,String username) {
         List<Map<String,Object>> records=db.queryForList("SELECT * FROM repair WHERE id=?",id);
         if (records.isEmpty()) throw new IllegalArgumentException("记录不存在");
-        var record=records.get(0); owner(record,admin,username); status(record,"WAITING"); return record;
+        var record=records.get(0); owner(record,admin,username); return record;
     }
     private Map<String,Object> locked(String table,long id) {
         return db.query("SELECT * FROM "+table+" WHERE id=? FOR UPDATE",rs -> {
@@ -120,13 +139,17 @@ public class BusinessService {
         }
     }
     @Transactional
-    public void createHousing(boolean admin,String username,Long selected) {
+    public void createHousing(boolean admin,String username,Long selected,Long bedId) {
         long student=chosenStudent(admin,username,selected);
         // 锁住学生行，使同一学生的并发申请不能同时通过检查。
         locked("student",student);
         if (db.queryForObject("SELECT COUNT(*) FROM housing WHERE student_id=? AND status IN ('PENDING','ASSIGNED','CHECKED_IN')",Integer.class,student)>0)
             throw new IllegalArgumentException("该学生已有未结束的入住申请或入住记录");
-        db.update("INSERT INTO housing(student_id,status) VALUES (?,'PENDING')",student);
+        if (bedId==null || bedId<1) throw new IllegalArgumentException("请选择空闲床位");
+        var bed=locked("bed",bedId);
+        if (!"FREE".equals(bed.get("status"))) throw new IllegalArgumentException("该床位已被占用，请选择其他床位");
+        // 申请阶段只记录意向床位，床位仍保持空闲，待管理员确认后再占用。
+        db.update("INSERT INTO housing(student_id,bed_id,status) VALUES (?,?,'PENDING')",student,bedId);
     }
     @Transactional
     public void deleteHousing(long id,boolean admin,String username) {
@@ -147,6 +170,12 @@ public class BusinessService {
                 db.update("UPDATE bed SET status='OCCUPIED' WHERE id=?",bedId);
                 db.update("UPDATE housing SET bed_id=?,status='ASSIGNED' WHERE id=?",bedId,id);
             }
+            case "unassign" -> {
+                if(!admin) throw new IllegalArgumentException("仅管理员可取消分配"); status(h,"ASSIGNED");
+                long bid=((Number)h.get("bed_id")).longValue(); var bed=locked("bed",bid); status(bed,"OCCUPIED");
+                db.update("UPDATE housing SET bed_id=NULL,status='PENDING' WHERE id=?",id);
+                db.update("UPDATE bed SET status='FREE' WHERE id=?",bid);
+            }
             case "checkin" -> {
                 if(!admin) throw new IllegalArgumentException("仅管理员可办理入住"); status(h,"ASSIGNED");
                 db.update("UPDATE housing SET status='CHECKED_IN', check_in_at=NOW() WHERE id=?",id);
@@ -156,9 +185,15 @@ public class BusinessService {
                 if(h.get("checkout_requested_at")!=null) throw new IllegalArgumentException("已申请退宿，请等待办理");
                 db.update("UPDATE housing SET checkout_requested_at=NOW() WHERE id=?",id);
             }
-            case "checkout" -> {
+            case "cancel-checkout" -> {
+                if(admin) throw new IllegalArgumentException("仅学生可撤销退宿申请"); owner(h,false,username); status(h,"CHECKED_IN");
+                if(h.get("checkout_requested_at")==null) throw new IllegalArgumentException("尚未申请退宿");
+                db.update("UPDATE housing SET checkout_requested_at=NULL WHERE id=?",id);
+            }
+            case "checkout", "force-checkout" -> {
                 if(!admin) throw new IllegalArgumentException("仅管理员可办理退宿"); status(h,"CHECKED_IN");
-                if(h.get("checkout_requested_at")==null) throw new IllegalArgumentException("学生尚未申请退宿");
+                if(action.equals("checkout") && h.get("checkout_requested_at")==null) throw new IllegalArgumentException("学生尚未申请退宿");
+                if(action.equals("force-checkout") && h.get("checkout_requested_at")!=null) throw new IllegalArgumentException("学生已申请退宿，请使用办理退宿");
                 long bid=((Number)h.get("bed_id")).longValue(); var bed=locked("bed",bid); status(bed,"OCCUPIED");
                 // 在同一事务中更新入住记录和床位：任何一步失败都会回滚。
                 db.update("UPDATE housing SET status='CHECKED_OUT',check_out_at=NOW() WHERE id=?",id);

@@ -6,27 +6,41 @@ import java.security.SecureRandom;
 import java.util.Base64;
 import javax.crypto.SecretKeyFactory;
 import javax.crypto.spec.PBEKeySpec;
+import org.springframework.boot.web.servlet.ServletListenerRegistrationBean;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
+import org.springframework.security.core.session.SessionRegistry;
+import org.springframework.security.core.session.SessionRegistryImpl;
 import org.springframework.security.core.userdetails.*;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.HttpStatusEntryPoint;
+import org.springframework.security.web.session.HttpSessionEventPublisher;
 import org.springframework.security.web.util.matcher.AntPathRequestMatcher;
 import org.springframework.http.HttpStatus;
 
 @Configuration
 public class SecurityConfig {
-    @Bean SecurityFilterChain security(HttpSecurity http) throws Exception {
+    @Bean SecurityFilterChain security(HttpSecurity http, SessionRegistry sessionRegistry) throws Exception {
         return http.authorizeHttpRequests(a -> a.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/dashboard", "/repairs", "/housing", "/profile", "/students", "/dormitories", "/beds", "/users", "/api/csrf", "/api/login").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN").anyRequest().authenticated())
             .exceptionHandling(e -> e.defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), new AntPathRequestMatcher("/api/**")))
+            .sessionManagement(s -> s.sessionConcurrency(c -> c.maximumSessions(-1).sessionRegistry(sessionRegistry)
+                .expiredSessionStrategy(event -> {
+                    event.getResponse().setStatus(HttpStatus.UNAUTHORIZED.value());
+                    event.getResponse().setContentType("application/json;charset=UTF-8");
+                    event.getResponse().getWriter().write("{\"message\":\"登录状态已失效，请重新登录\"}");
+                })))
             .formLogin(f -> f.loginPage("/").loginProcessingUrl("/api/login")
                 .successHandler((request,response,auth) -> response.setStatus(204))
                 .failureHandler((request,response,error) -> { response.setStatus(401); response.setContentType("application/json;charset=UTF-8"); response.getWriter().write("{\"message\":\"账号或密码错误\"}"); }).permitAll())
             .logout(l -> l.logoutUrl("/api/logout").logoutSuccessHandler((request,response,auth) -> response.setStatus(204))).build();
+    }
+    @Bean SessionRegistry sessionRegistry() { return new SessionRegistryImpl(); }
+    @Bean static ServletListenerRegistrationBean<HttpSessionEventPublisher> httpSessionEventPublisher() {
+        return new ServletListenerRegistrationBean<>(new HttpSessionEventPublisher());
     }
     @Bean UserDetailsService users(JdbcTemplate jdbc) {
         return username -> jdbc.query("SELECT username,password_hash,role FROM `user` WHERE username=?", rs -> {

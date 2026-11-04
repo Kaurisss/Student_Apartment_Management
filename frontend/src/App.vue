@@ -22,33 +22,35 @@ const csrf = ref({}), login = reactive({ username: '', password: '' })
 const repairFilter = reactive({ keyword: '', dorm: '', status: '' })
 let routeReady = false
 const page = ref(1), result = ref({ rows: [], total: 0 }), meta = ref({ title: '', fields: [] }), stats = ref(null)
-const students = ref([]), beds = ref([])
+const beds = ref([]), activeHousing = ref(null)
 const showEditor = ref(false), editId = ref(null), form = reactive({}), formRef = ref(null)
+const editorMeta = ref({ title: '', fields: [] })
 const showEvaluate = ref(false), evaluateId = ref(null), evaluation = ref('')
 const showAssign = ref(false), assignId = ref(null), selectedBed = ref(undefined)
 const adminKeys = ['students', 'dormitories', 'beds', 'users']
-const profile = reactive({ username:'', student_no:'', name:'', password:'' })
+const profile = reactive({ username:'', student_no:'', name:'', password:'', oldPassword:'' })
 const labels = { statistics:'数据概览', profile:'个人信息', repairs:'报修管理', housing:'入住与退宿', students:'学生管理', dormitories:'宿舍管理', beds:'床位管理', users:'账号管理' }
 const statusLabels = { WAITING:'待受理', IN_PROGRESS:'处理中', COMPLETED:'已完成', CONFIRMED:'已确认', PENDING:'待审核', ASSIGNED:'已分配', CHECKED_IN:'已入住', CHECKED_OUT:'已退宿', FREE:'空闲', OCCUPIED:'已占用' }
 const admin = computed(() => !!user.value?.admin)
 const title = computed(() => current.value === 'repairs' && !admin.value ? '我的报修' : current.value === 'housing' && !admin.value ? '我的入住' : labels[current.value] || '')
 const pagination = computed(() => ({ current:page.value, pageSize:10, total:result.value.total, showTotal:true, showPageSize:false }))
-const studentOptions = computed(() => students.value.map(s => ({ value:String(s.id), label:s.label })))
 const bedOptions = computed(() => beds.value.map(b => ({ value:String(b.id), label:b.label })))
-const editorTitle = computed(() => (editId.value ? '编辑' : current.value === 'repairs' || current.value === 'housing' ? '提交' : '新增') + (adminKeys.includes(current.value) ? meta.value.title : current.value === 'repairs' ? '报修' : '入住申请'))
+const editingSelf = computed(() => current.value === 'users' && !!editId.value && form.username === user.value?.username)
+const noStudentAccounts = computed(() => current.value === 'students' && !editId.value && (editorMeta.value.fields || []).some(f => f.name === 'user_id' && Object.keys(f.options || {}).length === 0))
+const editorTitle = computed(() => (editId.value ? '编辑' : current.value === 'repairs' || current.value === 'housing' ? '提交' : '新增') + (adminKeys.includes(current.value) ? editorMeta.value.title : current.value === 'repairs' ? '报修' : '入住申请'))
 const dormRows = computed(() => (stats.value?.dorms || []).map(item => ({ ...item, key: item.building + item.room_no })))
 const rules = computed(() => {
   const r = {}
-  if (adminKeys.includes(current.value)) for (const f of meta.value.fields || []) {
+  if (adminKeys.includes(current.value)) for (const f of editorMeta.value.fields || []) {
     const required = f.required || (f.name === 'password' && !editId.value)
     r[f.name] = [{ required, message:`请填写${f.label}` }]
     if (f.name === 'password' && (!editId.value || form.password)) r[f.name].push({ minLength:6, maxLength:100, message:'密码长度须为6至100个字符' })
   }
+  if (editingSelf.value && form.password) r.oldPassword = [{ required:true, message:'请填写原密码' }]
   if (current.value === 'repairs') {
     r.description = [{ validator:(value, callback) => { if (!String(value ?? '').trim()) callback('请输入故障描述') } }]
-    if (admin.value && !editId.value) r.studentId = [{ required:true, message:'请选择学生' }]
   }
-  if (current.value === 'housing' && admin.value) r.studentId = [{ required:true, message:'请选择学生' }]
+  if (current.value === 'housing') r.bedId = [{ required:true, message:'请选择空闲床位' }]
   return r
 })
 const columns = computed(() => {
@@ -71,7 +73,7 @@ const columns = computed(() => {
 const dormColumns = [
   { title:'楼栋', dataIndex:'building' }, { title:'宿舍', dataIndex:'room_no', width:88 },
   { title:'已占用', dataIndex:'occupied', width:88 }, { title:'床位总数', dataIndex:'total', width:96 },
-  { title:'入住率', dataIndex:'rate', slotName:'rate', width:160 }
+  { title:'占用率', dataIndex:'rate', slotName:'rate', width:160 }
 ]
 const dormPagination = { pageSize:10, showPageSize:false, showTotal:true }
 const repairStates = computed(() => ['WAITING', 'IN_PROGRESS', 'COMPLETED', 'CONFIRMED'].map(status => ({
@@ -88,7 +90,11 @@ async function request(url, { method = 'GET', data, formData = false } = {}) {
   if (method !== 'GET') headers[csrf.value.headerName || 'X-CSRF-TOKEN'] = csrf.value.token || ''
   if (data !== undefined) headers['Content-Type'] = formData ? 'application/x-www-form-urlencoded' : 'application/json'
   const response = await fetch('/api' + url, { method, headers, credentials:'same-origin', body:data === undefined ? undefined : formData ? new URLSearchParams(data) : JSON.stringify(data) })
-  if (!response.ok) { let error; try { error = await response.json() } catch { /* 403 等空响应 */ } throw new Error(error?.message || (response.status === 401 ? '请先登录' : response.status === 403 ? '没有操作权限' : '请求失败，请重试')) }
+  if (!response.ok) {
+    let error; try { error = await response.json() } catch { /* 403 等空响应 */ }
+    if (response.status === 401 && user.value) { user.value = null; activeHousing.value = null; token().catch(() => {}) }
+    throw new Error(error?.message || (response.status === 401 ? '请先登录' : response.status === 403 ? '没有操作权限' : '请求失败，请重试'))
+  }
   if (response.status === 204 || response.headers.get('content-length') === '0') return null
   const body = await response.text(); return body ? JSON.parse(body) : null
 }
@@ -98,9 +104,11 @@ function routeAllowed(name) {
   if (name === 'profile') return !admin.value
   return admin.value || (name !== 'statistics' && !adminKeys.includes(name))
 }
+function blocked() { return !!user.value && !user.value.admin && user.value.studentLinked === false }
 async function initialize() {
   try {
     await token(); user.value = await request('/session')
+    if (blocked()) { routeReady = true; return }
     if (!routeAllowed(route.name)) await router.replace({ name: homeName() })
     routeReady = true; await load()
   } catch { user.value = null }
@@ -111,12 +119,13 @@ async function doLogin() {
   try {
     await request('/login', { method:'POST', data:login, formData:true }); await token(); user.value = await request('/session')
     page.value = 1; login.password = ''; routeReady = true
+    if (blocked()) return
     if (route.name !== homeName()) await router.replace({ name: homeName() })
     else await load()
   }
   catch (e) { Message.error(e.message); await token() } finally { saving.value = false }
 }
-async function logout() { try { await request('/logout', { method:'POST' }); drawerOpen.value = false; user.value = null; await token() } catch (e) { Message.error(e.message) } }
+async function logout() { try { await request('/logout', { method:'POST' }); drawerOpen.value = false; user.value = null; activeHousing.value = null; await token() } catch (e) { Message.error(e.message) } }
 async function load() {
   busy.value = true
   try {
@@ -124,7 +133,7 @@ async function load() {
     if (current.value === 'statistics') { stats.value = await request('/admin/statistics'); return }
     if (current.value === 'profile') {
       const data = await request('/profile')
-      profile.username = data.username; profile.student_no = data.student_no; profile.name = data.name; profile.password = ''
+      profile.username = data.username; profile.student_no = data.student_no; profile.name = data.name; profile.password = ''; profile.oldPassword = ''
       return
     }
     if (current.value === 'repairs') {
@@ -140,15 +149,19 @@ async function load() {
     const data = await request(resource + '?page=' + page.value)
     if (adminKeys.includes(current.value)) { meta.value = data.meta; result.value = data.data } else result.value = data
     page.value = result.value.page
+    if (current.value === 'housing' && !admin.value) activeHousing.value = await request('/housing/active')
   } catch (e) { Message.error(e.message) } finally { busy.value = false }
 }
 async function saveProfile({ errors }) {
   if (errors) return
   if (profile.password && (profile.password.length < 6 || profile.password.length > 100)) return Message.warning('密码长度须为6至100个字符')
+  if (profile.password && !profile.oldPassword) return Message.warning('修改密码请填写原密码')
   saving.value = true
   try {
-    await request('/profile', { method:'PUT', data:{ name:profile.name, student_no:profile.student_no, password:profile.password } })
-    profile.password = ''; Message.success('保存成功')
+    const changing = !!profile.password
+    await request('/profile', { method:'PUT', data:{ name:profile.name, password:profile.password, oldPassword:profile.oldPassword } })
+    profile.password = ''; profile.oldPassword = ''
+    Message.success(changing ? '密码已修改，其他设备已退出登录' : '保存成功')
   } catch (e) { Message.error(e.message) } finally { saving.value = false }
 }
 async function navigate(key) {
@@ -162,12 +175,14 @@ async function openEditor(record = null) {
   resetForm(); editId.value = record?.id || null
   try {
     if (adminKeys.includes(current.value)) {
+      editorMeta.value = await request('/admin/' + current.value + '/form' + (record ? '?editingId=' + record.id : ''))
       if (record) Object.assign(form, await request('/admin/' + current.value + '/' + record.id))
-      for (const f of meta.value.fields) if (form[f.name] != null) form[f.name] = String(form[f.name])
+      for (const f of editorMeta.value.fields) if (form[f.name] != null) form[f.name] = String(form[f.name])
     } else if (current.value === 'repairs') {
       if (record) Object.assign(form, await request('/repairs/' + record.id))
-      if (admin.value && !record) students.value = await request('/admin/options/students')
-    } else if (current.value === 'housing' && admin.value) students.value = await request('/admin/options/students')
+    } else if (current.value === 'housing') {
+      beds.value = await request('/beds/free')
+    }
     showEditor.value = true
   } catch (e) { Message.error(e.message) }
 }
@@ -177,11 +192,12 @@ async function saveEditor() {
   saving.value = true
   try {
     if (adminKeys.includes(current.value)) {
-      const body = {}; for (const f of meta.value.fields) body[f.name] = String(form[f.name] ?? '')
+      const body = {}; for (const f of editorMeta.value.fields) body[f.name] = String(form[f.name] ?? '')
+      if (editingSelf.value && body.password) body.oldPassword = String(form.oldPassword ?? '')
       await request('/admin/' + current.value + (editId.value ? '/' + editId.value : ''), { method:editId.value ? 'PUT' : 'POST', data:body })
     } else if (current.value === 'repairs') {
-      await request('/repairs' + (editId.value ? '/' + editId.value : ''), { method:editId.value ? 'PUT' : 'POST', data:{ description:form.description, studentId:form.studentId } })
-    } else await request('/housing', { method:'POST', data:{ studentId:form.studentId } })
+      await request('/repairs' + (editId.value ? '/' + editId.value : ''), { method:editId.value ? 'PUT' : 'POST', data:{ description:form.description } })
+    } else await request('/housing', { method:'POST', data:{ bedId:form.bedId } })
     Message.success('保存成功'); await load(); return true
   } catch (e) { Message.error(e.message); return false } finally { saving.value = false }
 }
@@ -193,6 +209,10 @@ function remove(record) {
 async function action(type, id, name, data = {}) {
   try { await request('/' + type + '/' + id + '/' + name, { method:'POST', data }); Message.success('操作成功'); await load(); return true } catch (e) { Message.error(e.message); return false }
 }
+function confirmAction(type, id, name, title, content) {
+  Modal.confirm({ title, content, okText:'确认', cancelText:'取消', okButtonProps:{ status:'danger' }, async onOk() { await action(type, id, name) } })
+}
+function goCreateAccount() { showEditor.value = false; router.push({ name:'users' }) }
 function openEvaluation(id) { evaluateId.value = id; evaluation.value = ''; showEvaluate.value = true }
 async function submitEvaluation() {
   if (!evaluation.value.trim()) { Message.warning('请填写评价'); return false }
@@ -200,7 +220,13 @@ async function submitEvaluation() {
   try { if (await action('repairs', evaluateId.value, 'confirm', { evaluation:evaluation.value })) return true; return false }
   finally { saving.value = false }
 }
-async function openAssign(id) { try { beds.value = await request('/admin/options/free-beds'); selectedBed.value = undefined; assignId.value = id; showAssign.value = true } catch (e) { Message.error(e.message) } }
+async function openAssign(record) {
+  try {
+    beds.value = await request('/admin/options/free-beds')
+    selectedBed.value = beds.value.some(b => Number(b.id) === Number(record.bed_id)) ? String(record.bed_id) : undefined
+    assignId.value = record.id; showAssign.value = true
+  } catch (e) { Message.error(e.message) }
+}
 async function submitAssign() {
   if (!selectedBed.value) { Message.warning('请选择空床位'); return false }
   saving.value = true
@@ -213,9 +239,9 @@ watch(() => route.name, (name, previous) => {
   load()
 })
 provide('desk', reactive({
-  title, current, admin, adminKeys, stats, columns, result, pagination, busy, saving, profile,
+  title, current, admin, adminKeys, stats, columns, result, pagination, busy, saving, profile, activeHousing,
   dormColumns, dormRows, dormPagination, repairStates, statusLabels, repairFilter,
-  openEditor, changePage, applyFilters, saveProfile, rate, percentage, date, tagColor, remove, action, openEvaluation, openAssign
+  openEditor, changePage, applyFilters, saveProfile, rate, percentage, date, tagColor, remove, action, confirmAction, openEvaluation, openAssign
 }))
 onMounted(() => {
   mobileQuery = window.matchMedia('(max-width: 767px)')
@@ -252,6 +278,13 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', syncMobile))
         </div>
       </main>
     </div>
+    <div v-else-if="blocked()" class="blocked-wrap">
+      <a-card class="blocked-card" :bordered="false">
+        <h2>账号尚未关联学生信息</h2>
+        <p>请联系管理员在「学生管理」中为本账号建立学生档案后再使用。</p>
+        <a-button type="primary" @click="logout">退出登录</a-button>
+      </a-card>
+    </div>
     <a-layout v-else class="app-layout">
       <a-layout-sider v-if="!isMobile" class="sider" :width="228">
         <AppNavigation :user="user" :current="current" @navigate="navigate" @logout="logout" />
@@ -273,18 +306,25 @@ onUnmounted(() => mobileQuery?.removeEventListener('change', syncMobile))
         </a-layout-content>
       </a-layout>
     </a-layout>
-    <a-modal v-model:visible="showEditor" :title="editorTitle" ok-text="保存" cancel-text="取消" :ok-loading="saving" unmount-on-close :on-before-ok="saveEditor">
+    <a-modal v-model:visible="showEditor" :title="editorTitle" ok-text="保存" cancel-text="取消" :ok-loading="saving" :ok-button-props="{ disabled: noStudentAccounts }" unmount-on-close :on-before-ok="saveEditor">
+      <div v-if="noStudentAccounts" class="form-guide">
+        <span>暂无可用的学生账号，请先在「账号管理」创建 STUDENT 账号。</span>
+        <a-button size="mini" @click="goCreateAccount">前往账号管理</a-button>
+      </div>
       <a-form ref="formRef" :model="form" :rules="rules" layout="vertical" class="modal-form">
         <template v-if="adminKeys.includes(current)">
-          <a-form-item v-for="field in meta.fields" :key="field.name" :field="field.name" :label="field.label">
-            <a-select v-if="field.type === 'select'" v-model="form[field.name]" placeholder="请选择" :options="Object.entries(field.options).map(([value, label]) => ({ value, label }))" />
+          <a-form-item v-for="field in editorMeta.fields" :key="field.name" :field="field.name" :label="field.label">
+            <a-select v-if="field.type === 'select'" v-model="form[field.name]" placeholder="请选择" :options="Object.entries(field.options).map(([value, label]) => ({ value, label }))" allow-search :filter-option="filterOption" />
             <a-input-password v-else-if="field.type === 'password'" v-model="form.password" :max-length="field.max" :placeholder="editId ? '留空则不修改密码' : ''" />
             <a-input v-else v-model="form[field.name]" :max-length="field.max" />
           </a-form-item>
+          <a-form-item v-if="editingSelf && form.password" field="oldPassword" label="原密码">
+            <a-input-password v-model="form.oldPassword" :max-length="100" placeholder="修改本人密码需验证原密码" />
+          </a-form-item>
         </template>
         <template v-else>
-          <a-form-item v-if="admin && !editId" field="studentId" label="学生">
-            <a-select v-model="form.studentId" placeholder="请选择学生" :options="studentOptions" allow-search :filter-option="filterOption" />
+          <a-form-item v-if="current === 'housing'" field="bedId" label="床位">
+            <a-select v-model="form.bedId" placeholder="请选择空闲床位" :options="bedOptions" allow-search :filter-option="filterOption" />
           </a-form-item>
           <a-form-item v-if="current === 'repairs'" field="description" label="故障描述">
             <a-textarea v-model="form.description" :auto-size="{ minRows:4, maxRows:8 }" :max-length="500" show-word-limit />

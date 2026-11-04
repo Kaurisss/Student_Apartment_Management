@@ -12,9 +12,12 @@ function openView(kind, record) { viewKind.value = kind; viewRecord.value = reco
 <template>
   <div class="page-header">
     <h1>{{ d.title }}</h1>
-    <a-button v-if="d.current !== 'statistics' && d.current !== 'profile'" type="primary" @click="d.openEditor()">
-      <template #icon><PhPlus :size="16" /></template>{{ d.current === 'repairs' ? '提交报修' : d.current === 'housing' ? '入住申请' : '新增' }}
-    </a-button>
+    <div class="header-actions">
+      <a-tag v-if="d.current === 'housing' && !d.admin && d.activeHousing?.active" color="orangered">{{ d.statusLabels[d.activeHousing.status] }}</a-tag>
+      <a-button v-if="d.current !== 'statistics' && d.current !== 'profile' && !(d.admin && (d.current === 'repairs' || d.current === 'housing'))" type="primary" :disabled="d.current === 'housing' && !d.admin && d.activeHousing?.active" @click="d.openEditor()">
+        <template #icon><PhPlus :size="16" /></template>{{ d.current === 'repairs' ? '提交报修' : d.current === 'housing' ? '入住申请' : '新增' }}
+      </a-button>
+    </div>
   </div>
   <div v-if="d.current === 'repairs'" class="filters">
     <a-input v-model="d.repairFilter.keyword" allow-clear placeholder="学生、学号或故障" @change="d.applyFilters" @press-enter="d.applyFilters" @clear="d.applyFilters" />
@@ -33,9 +36,10 @@ function openView(kind, record) { viewKind.value = kind; viewRecord.value = reco
     </div>
     <a-form :model="d.profile" layout="vertical" class="profile-form" @submit="d.saveProfile">
       <a-form-item label="用户名"><a-input :model-value="d.profile.username" disabled /></a-form-item>
-      <a-form-item field="student_no" label="学号" :rules="[{ required:true, message:'请填写学号' }]"><a-input v-model="d.profile.student_no" :max-length="30" /></a-form-item>
+      <a-form-item field="student_no" label="学号"><a-input v-model="d.profile.student_no" :max-length="30" disabled /><span class="field-hint">学号由管理员维护，如需变更请联系管理员。</span></a-form-item>
       <a-form-item field="name" label="姓名" :rules="[{ required:true, message:'请填写姓名' }]"><a-input v-model="d.profile.name" :max-length="50" /></a-form-item>
       <a-form-item field="password" label="新密码"><a-input-password v-model="d.profile.password" :max-length="100" placeholder="留空则不修改" /></a-form-item>
+      <a-form-item v-if="d.profile.password" field="oldPassword" label="原密码" :rules="[{ required:true, message:'请填写原密码' }]"><a-input-password v-model="d.profile.oldPassword" :max-length="100" placeholder="验证原密码后才能修改" /></a-form-item>
       <a-button type="primary" html-type="submit" :loading="d.saving">保存</a-button>
     </a-form>
   </a-card>
@@ -45,10 +49,10 @@ function openView(kind, record) { viewKind.value = kind; viewRecord.value = reco
       <a-row :gutter="[24, 24]" class="metrics">
         <a-col :xs="24" :sm="12">
           <a-card class="metric-card" :bordered="false">
-            <div class="metric-label">床位入住率</div>
+            <div class="metric-label">床位占用率</div>
             <div class="metric-value">{{ d.rate(d.stats.beds.occupied, d.stats.beds.total) }}</div>
             <a-progress :percent="d.percentage(d.stats.beds.occupied, d.stats.beds.total) / 100" :show-text="false" :stroke-width="4" :animation="false" color="#1D2129" track-color="#E5E6EB" />
-            <div class="metric-detail">已占用 <strong>{{ d.stats.beds.occupied }}</strong> / {{ d.stats.beds.total }} 个床位</div>
+            <div class="metric-detail">已占用 <strong>{{ d.stats.beds.occupied }}</strong> / {{ d.stats.beds.total }} 个床位（已分配未入住也计入）</div>
           </a-card>
         </a-col>
         <a-col :xs="24" :sm="12">
@@ -106,11 +110,14 @@ function openView(kind, record) { viewKind.value = kind; viewRecord.value = reco
             <button v-if="record.bed_label" type="button" @click="openView('housing', record)">查看分配</button>
             <template v-if="record.status === 'PENDING'">
               <button type="button" class="danger" @click="d.remove(record)">删除</button>
-              <button v-if="d.admin" type="button" @click="d.openAssign(record.id)">分配床位</button>
+              <button v-if="d.admin" type="button" @click="d.openAssign(record)">分配床位</button>
             </template>
             <button v-if="d.admin && record.status === 'ASSIGNED'" type="button" @click="d.action('housing', record.id, 'checkin')">办理入住</button>
+            <button v-if="d.admin && record.status === 'ASSIGNED'" type="button" class="danger" @click="d.confirmAction('housing', record.id, 'unassign', '取消床位分配', '取消后该床位将释放，申请退回待审核状态。')">取消分配</button>
             <button v-if="!d.admin && record.status === 'CHECKED_IN' && !record.checkout_requested_at" type="button" @click="d.action('housing', record.id, 'request-checkout')">申请退宿</button>
+            <button v-if="!d.admin && record.status === 'CHECKED_IN' && record.checkout_requested_at" type="button" @click="d.action('housing', record.id, 'cancel-checkout')">撤销退宿申请</button>
             <button v-if="d.admin && record.status === 'CHECKED_IN' && record.checkout_requested_at" type="button" @click="d.action('housing', record.id, 'checkout')">办理退宿</button>
+            <button v-if="d.admin && record.status === 'CHECKED_IN' && !record.checkout_requested_at" type="button" class="danger" @click="d.confirmAction('housing', record.id, 'force-checkout', '强制退宿', '该操作无需学生申请，确认后将立即释放床位。')">强制退宿</button>
           </template>
         </div></template>
         <template v-else-if="record[column.key + '_label']">{{ record[column.key + '_label'] }}</template>
