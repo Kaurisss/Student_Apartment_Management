@@ -16,11 +16,16 @@ async function mockApi(page, { admin = true, empty = false, studentLinked = true
     else if (path === '/api/session') body = { username: admin ? 'admin' : 'student01', admin, studentLinked: admin || studentLinked }
     else if (path === '/api/admin/students/form') body = studentMeta
     else if (path === '/api/admin/students') body = { meta: studentMeta, data: { rows: [], page: 1, pages: 1, total: 0 } }
-    else if (path === '/api/admin/statistics') body = {
+    else if (path === '/api/statistics' || path === '/api/admin/statistics') body = {
       beds: { occupied: empty ? 0 : 1, total: empty ? 0 : 2 },
       repairs: { done: 0, total: empty ? 0 : 1 },
       dorms: [{ building: '1号楼', room_no: '301', occupied: empty ? 0 : 1, total: empty ? 0 : 2 }],
       repairStates: empty ? [] : [{ status: 'WAITING', total: 1 }]
+    }
+    else if (path === '/api/my/statistics') body = {
+      housing:{status:'CHECKED_IN',bed_label:'1号楼 301 / 01号床',checkout_requested_at:null},
+      repairs:{total:3,pending:1,awaiting_evaluation:1},
+      repairStates:[{status:'WAITING',total:1},{status:'COMPLETED',total:1},{status:'CONFIRMED',total:1}]
     }
     else if (path === '/api/repairs') body = {
       rows: [{ id: 1, student_no: 'S2026001', student_name: '示例学生', description: '宿舍灯具无法正常开启', status: 'WAITING', created_at: '2026-01-01T10:00:00', evaluation: null }],
@@ -96,10 +101,101 @@ test('student drawer hides admin navigation on a narrow screen', async ({ page }
   await expect(page.getByRole('heading', { name: '我的报修' })).toBeVisible()
   await page.getByRole('button', { name: '打开导航' }).click()
   await expect(page.getByRole('menuitem', { name: '学生管理' })).toHaveCount(0)
-  await expect(page.getByRole('menuitem', { name: '数据概览' })).toHaveCount(0)
+  await expect(page.getByRole('menuitem', { name: '数据概览' })).toBeVisible()
   await page.getByRole('menuitem', { name: '入住与退宿' }).click()
   await expect(page.getByRole('heading', { name: '我的入住' })).toBeVisible()
   await expectNoPageOverflow(page)
+})
+
+test('student overview shows personal housing and repair progress', async ({ page }) => {
+  await page.setViewportSize({width:375,height:812})
+  await mockApi(page, {admin:false})
+  const requests=[]
+  page.on('request',request => { if (request.url().includes('/api/')) requests.push(new URL(request.url()).pathname) })
+  await page.goto('/dashboard')
+  await expect(page.getByText('我的住宿',{exact:true})).toBeVisible()
+  await expect(page.getByText('1号楼 301 / 01号床',{exact:true})).toBeVisible()
+  await expect(page.getByText('待评价',{exact:true})).toBeVisible()
+  await expect(page.getByText('各宿舍床位',{exact:true})).toHaveCount(0)
+  await expect(page.getByText('入住率',{exact:true})).toHaveCount(0)
+  expect(requests).toContain('/api/my/statistics')
+  expect(requests).not.toContain('/api/admin/statistics')
+  expect(requests).not.toContain('/api/statistics')
+  await expectNoPageOverflow(page)
+  await page.getByRole('button',{name:'查看我的报修'}).click()
+  await expect(page.getByRole('heading',{name:'我的报修'})).toBeVisible()
+  await page.setViewportSize({width:1440,height:900})
+  await page.getByRole('menuitem',{name:'数据概览'}).click()
+  await page.route('**/api/logout',route => route.fulfill({status:204}))
+  await page.getByRole('button',{name:'退出登录'}).click()
+  await expect(page.getByRole('button',{name:'返回登录',exact:true})).toBeVisible()
+  await expect(page.locator('.metric-value')).toHaveCount(2)
+  await expect(page.getByText('各宿舍床位',{exact:true})).toHaveCount(0)
+})
+
+test('student summary cards share edges and action baselines', async ({ page }) => {
+  await mockApi(page,{admin:false})
+  await page.goto('/dashboard')
+  await expect(page.locator('.student-summary')).toHaveCount(2)
+  for (const width of [1440,768,375,320]) {
+    await page.setViewportSize({width,height:900})
+    const cards=await page.locator('.student-summary').evaluateAll(elements => elements.map(el => {
+      const card=el.getBoundingClientRect(), action=el.querySelector('.student-summary-action').getBoundingClientRect()
+      return {top:card.top,bottom:card.bottom,actionTop:action.top,actionLeft:action.left-card.left}
+    }))
+    if (width>=768) {
+      expect(Math.abs(cards[0].top-cards[1].top)).toBeLessThan(1)
+      expect(Math.abs(cards[0].bottom-cards[1].bottom)).toBeLessThan(1)
+      expect(Math.abs(cards[0].actionTop-cards[1].actionTop)).toBeLessThan(1)
+    }
+    expect(Math.abs(cards[0].actionLeft-cards[1].actionLeft)).toBeLessThan(1)
+    await expectNoPageOverflow(page)
+  }
+})
+
+test('polling updates statistics without flicker or overlapping requests and resumes when visible', async ({ page }) => {
+  await page.clock.install()
+  await mockApi(page,{admin:false})
+  let calls=0, delayed
+  const body={housing:null,repairs:{total:9,pending:2,awaiting_evaluation:1},repairStates:[]}
+  await page.route('**/api/my/statistics',async route => {
+    calls++
+    if (calls===2) { delayed=route; return }
+    await route.fulfill({json:{...body,repairs:{...body.repairs,total:calls===1?0:9}}})
+  })
+  await page.goto('/dashboard')
+  await expect(page.locator('.student-repair-counts strong').last()).toHaveText('0')
+  await page.clock.fastForward(30000)
+  await expect.poll(() => calls).toBe(2)
+  await expect(page.locator('.student-summary')).toHaveCount(2)
+  await expect(page.locator('.arco-skeleton')).toHaveCount(0)
+  await page.clock.fastForward(30000)
+  expect(calls).toBe(2)
+  await delayed.fulfill({json:body})
+  await expect(page.locator('.student-repair-counts strong')).toHaveText(['2','1','9'])
+  await page.evaluate(() => { Object.defineProperty(document,'hidden',{configurable:true,get:()=>true}); document.dispatchEvent(new Event('visibilitychange')) })
+  await page.clock.fastForward(30000)
+  expect(calls).toBe(2)
+  await page.evaluate(() => { Object.defineProperty(document,'hidden',{configurable:true,get:()=>false}); document.dispatchEvent(new Event('visibilitychange')) })
+  await expect.poll(() => calls).toBe(3)
+})
+
+test('automatic refresh pauses while a repair form is open', async ({ page }) => {
+  await page.clock.install()
+  await mockApi(page,{admin:false})
+  await page.route('**/api/dormitories',route => route.fulfill({json:[{id:1,label:'1号楼 301'}]}))
+  let calls=0
+  page.on('request',request => { if (new URL(request.url()).pathname==='/api/repairs') calls++ })
+  await page.goto('/repairs')
+  await page.getByRole('button',{name:'提交报修',exact:true}).click()
+  await page.locator('.arco-modal:visible textarea').fill('尚未提交的报修内容')
+  const before=calls
+  await page.clock.fastForward(30000)
+  expect(calls).toBe(before)
+  await expect(page.locator('.arco-modal:visible textarea')).toHaveValue('尚未提交的报修内容')
+  await page.getByRole('button',{name:'取消',exact:true}).click()
+  await page.clock.fastForward(30000)
+  await expect.poll(() => calls).toBeGreaterThan(before)
 })
 
 test('empty statistics render zero percentages and four status counts', async ({ page }) => {

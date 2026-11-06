@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Exercise the JSON API against a disposable copy of assignment2-original.sql, never a real database.
+"""Exercise the JSON API against a disposable copy of sql/init.sql, never a real database.
 BASE_URL=http://127.0.0.1:18080 python3 scripts/smoke_test.py
 Only Python's standard library is required. The script creates and changes data.
 """
@@ -44,7 +44,37 @@ def row(client,entity,field,value):
     items=client.ok('/admin/'+entity)['data']['rows']
     return next(x for x in items if str(x[field])==str(value))
 def main():
+    guest=Client()
+    assert guest.ok('/statistics')['beds']['total']==2
+    assert set(guest.ok('/statistics'))=={'beds','repairs'}
+    assert guest.call('/my/statistics')[0]==401
+    assert guest.call('/admin/visitors')[0]==401
+    registration={'username':'registered01','password':'123456','name':'注册学生','student_no':'REGISTER001','class_name':'计应2401','phone':'13800138000','role':'ADMIN'}
+    guest.ok('/register','POST',registration)
+    guest.fail('/register','POST',{**registration,'username':'rollback01'},'重复')
+    registered=Client(); registered.login('registered01')
+    assert registered.ok('/session')['admin'] is False
+    assert registered.ok('/session')['studentLinked'] is True
+    assert registered.ok('/my/statistics')['repairs']['total']==0
+    assert registered.ok('/my/statistics')['housing'] is None
+    assert registered.ok('/profile')['class_name']=='计应2401'
+    registered.ok('/profile','PUT',{'name':'注册学生','class_name':'计应2402','phone':'13900139000'})
+    assert registered.ok('/profile')['phone']=='13900139000'
+    assert registered.call('/admin/visitors')[0]==403
+    print('PASS 公共统计、学生注册、强制学生角色、重复学号拒绝')
     a,s=Client(),Client(); a.login('admin'); s.login('student01')
+    assert not any(x['username']=='rollback01' for x in a.ok('/admin/users')['data']['rows'])
+    registered_sid=row(a,'students','student_no','REGISTER001')['id']
+    registered_uid=row(a,'users','username','registered01')['id']
+    visitor={'name':'来访家长','student_id':str(registered_sid),'arrived_at':'2026-11-06T10:00','left_at':''}
+    a.ok('/admin/visitors','POST',visitor)
+    vid=row(a,'visitors','name','来访家长')['id']
+    a.fail(f'/admin/visitors/{vid}','PUT',{**visitor,'left_at':'2026-11-06T09:00'},'不能早于')
+    a.ok(f'/admin/visitors/{vid}','PUT',{**visitor,'left_at':'2026-11-06T11:00'})
+    assert a.ok(f'/admin/visitors/{vid}')['left_at'] is not None
+    a.ok(f'/admin/visitors/{vid}','DELETE')
+    a.ok(f'/admin/students/{registered_sid}','DELETE'); a.ok(f'/admin/users/{registered_uid}','DELETE')
+    print('PASS 注册失败事务回滚、访客增删改查与时间校验')
     assert a.ok('/session')['admin'] and a.ok('/session')['studentLinked']
     assert not s.ok('/session')['admin'] and s.ok('/session')['studentLinked']
     assert s.call('/admin/users')[0] == 403
@@ -80,22 +110,34 @@ def main():
     assert a.ok('/admin/dormitories')['data']['pages'] >= 2
     assert any(x['building']=='1号楼' for x in a.ok('/admin/dormitories?page=2')['data']['rows'])
     print('PASS 账号、学生、宿舍、床位增删改查及分页')
-    s.ok('/repairs','POST',{'description':'测试漏水'})
+    s.fail('/repairs','POST',{'description':'缺少位置'},'请选择报修宿舍')
+    s.ok('/repairs','POST',{'description':'测试漏水','dormitory_id':1})
     rid=next(x['id'] for x in s.ok('/repairs')['rows'] if x['description']=='测试漏水')
-    s.ok(f'/repairs/{rid}','PUT',{'description':'测试漏水已修改'})
+    s.ok(f'/repairs/{rid}','PUT',{'description':'测试漏水已修改','dormitory_id':1})
     s.fail(f'/repairs/{rid}/accept','POST',{},'仅管理员')
     a.fail(f'/repairs/{rid}/complete','POST',{},'状态已变化')
-    a.ok(f'/repairs/{rid}/accept','POST',{}); a.ok(f'/repairs/{rid}/complete','POST',{})
-    s.ok(f'/repairs/{rid}/confirm','POST',{'evaluation':'处理及时'})
+    a.ok(f'/repairs/{rid}/accept','POST',{})
+    a.fail(f'/repairs/{rid}/complete','POST',{},'完成说明不能为空')
+    a.ok(f'/repairs/{rid}/complete','POST',{'completion_note':'已更换水管'})
+    s.fail(f'/repairs/{rid}/confirm','POST',{'evaluation':'处理及时'},'请选择满意或不满意')
+    s.ok(f'/repairs/{rid}/confirm','POST',{'evaluation':'处理及时','satisfaction':'SATISFIED'})
+    s.fail(f'/repairs/{rid}/confirm','POST',{'evaluation':'重复','satisfaction':'DISSATISFIED'},'状态已变化')
+    assert s.ok(f'/repairs/{rid}')['completion_note']=='已更换水管'
+    assert s.ok(f'/repairs/{rid}')['satisfaction']=='SATISFIED'
     assert next(x for x in s.ok('/repairs')['rows'] if x['id']==rid)['status']=='CONFIRMED'
     assert s.ok(f'/repairs/{rid}')['status']=='CONFIRMED'
-    s.ok('/repairs','POST',{'description':'临时待删除'})
+    s.ok('/repairs','POST',{'description':'临时待删除','dormitory_id':1})
     temp=next(x['id'] for x in s.ok('/repairs')['rows'] if x['description']=='临时待删除')
     s.ok(f'/repairs/{temp}','DELETE')
     print('PASS 报修增删改查、四状态流转、状态与权限校验')
     a.fail('/housing/1/checkout','POST',{},'状态已变化')
     a.ok('/housing/1/checkin','POST',{}); a.fail('/housing/1/checkout','POST',{},'尚未申请退宿')
     s.ok('/housing/1/request-checkout','POST',{}); a.ok('/housing/1/checkout','POST',{})
+    assert next(x for x in s.ok('/repairs')['rows'] if x['id']==rid)['dorm_label']=='1号楼 301'
+    a.ok('/admin/dormitories/1','PUT',{'building':'1号楼','room_no':'302','room_type':'6人间'})
+    assert next(x for x in s.ok('/repairs')['rows'] if x['id']==rid)['dorm_label']=='1号楼 301'
+    assert a.ok('/admin/dormitories/1')['room_type']=='6人间'
+    a.ok('/admin/dormitories/1','PUT',{'building':'1号楼','room_no':'301','room_type':'4人间'})
     assert [x['id'] for x in s.ok('/beds/free')]==[1,2]
     s.fail('/housing','POST',{},'请选择空闲床位')
     s.ok('/housing','POST',{'bedId':2}); s.fail('/housing','POST',{'bedId':2},'已有未结束')
@@ -139,7 +181,7 @@ def main():
     other.ok('/profile','PUT',{'name':profile['name'],'password':'654321','oldPassword':'123456'})
     assert second.call('/repairs')[0] == 401
     assert other.ok('/repairs') is not None
-    other.ok('/repairs','POST',{'description':'待删除报修'})
+    other.ok('/repairs','POST',{'description':'待删除报修','dormitory_id':1})
     other_repair=next(x['id'] for x in other.ok('/repairs')['rows'] if x['description']=='待删除报修')
     a.fail(f'/admin/students/{sid}','DELETE',None,'报修记录')
     a.ok(f'/repairs/{other_repair}','DELETE')

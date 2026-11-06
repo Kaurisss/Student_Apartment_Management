@@ -12,6 +12,7 @@ export const router = createRouter({
     { path: '/students', name: 'students', component: Page },
     { path: '/dormitories', name: 'dormitories', component: Page },
     { path: '/beds', name: 'beds', component: Page },
-    { path: '/users', name: 'users', component: Page }
+    { path: '/users', name: 'users', component: Page },
+    { path: '/visitors', name: 'visitors', component: Page }
   ]
 })

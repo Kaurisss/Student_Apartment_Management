@@ -25,7 +25,7 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
     <div class="navigation-scroll">
       <div class="navigation-label">工作台</div>
       <a-menu :selected-keys="[current]" @menu-item-click="key => emit('navigate', key)">
-        <a-menu-item v-if="user.admin" key="statistics" role="menuitem">
+        <a-menu-item key="statistics" role="menuitem">
           <template #icon><PhChartBar :size="18" /></template>数据概览
         </a-menu-item>
         <a-menu-item v-if="!user.admin" key="profile" role="menuitem">
@@ -52,6 +52,9 @@ const emit = defineEmits(['navigate', 'logout', 'close'])
           </a-menu-item>
           <a-menu-item key="users" role="menuitem">
             <template #icon><PhUsers :size="18" /></template>账号管理
+          </a-menu-item>
+          <a-menu-item key="visitors" role="menuitem">
+            <template #icon><PhUser :size="18" /></template>访客登记
           </a-menu-item>
         </a-menu>
       </template>

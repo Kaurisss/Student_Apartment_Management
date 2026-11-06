@@ -14,19 +14,20 @@ public class BusinessService {
     public BusinessService(JdbcTemplate db, PasswordEncoder passwords, SessionService sessions) { this.db=db; this.passwords=passwords; this.sessions=sessions; }
     public record Page(List<Map<String,Object>> rows, int page, int pages, long total) {}
     public Map<String,Object> profile(String username) {
-        List<Map<String,Object>> rows=db.queryForList("SELECT u.username, s.student_no, s.name FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
+        List<Map<String,Object>> rows=db.queryForList("SELECT u.username, s.student_no, s.name, s.class_name, s.phone FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
         if (rows.isEmpty()) throw new IllegalArgumentException("该账号尚未关联学生信息，请联系管理员");
         return rows.get(0);
     }
     @Transactional
-    public void updateProfile(String username, String name, String studentNo, String password, String oldPassword) {
+    public void updateProfile(String username, String name, String studentNo, String password, String oldPassword, String className, String phone) {
         List<Map<String,Object>> rows=db.queryForList("SELECT s.id, s.student_no, u.password_hash FROM student s JOIN `user` u ON u.id=s.user_id WHERE u.username=?", username);
         if (rows.isEmpty()) throw new IllegalArgumentException("该账号尚未关联学生信息，请联系管理员");
         var current=rows.get(0);
         long id=((Number)current.get("id")).longValue();
         if (studentNo != null && !studentNo.isBlank() && !studentNo.trim().equals(current.get("student_no")))
             throw new IllegalArgumentException("学号由管理员维护，请联系管理员");
-        db.update("UPDATE student SET name=? WHERE id=?", text(name,"姓名",50), id);
+        if (className.length()>50 || phone.length()>30) throw new IllegalArgumentException("班级或联系电话过长");
+        db.update("UPDATE student SET name=?,class_name=?,phone=? WHERE id=?", text(name,"姓名",50),className.trim(),phone.trim(), id);
         if (password != null && !password.isBlank()) {
             if (password.length() < 6 || password.length() > 100) throw new IllegalArgumentException("密码长度须为6至100个字符");
             if (oldPassword == null || oldPassword.isBlank()) throw new IllegalArgumentException("修改密码需填写原密码");
@@ -44,6 +45,18 @@ public class BusinessService {
         return ids.get(0);
     }
     public List<Map<String,Object>> students() { return db.queryForList("SELECT id, CONCAT(student_no,' ',name) AS label FROM student ORDER BY student_no"); }
+    public List<Map<String,Object>> dormitories() { return db.queryForList("SELECT id, CONCAT(building,' ',room_no) AS label FROM dormitory ORDER BY building,room_no"); }
+    @Transactional
+    public void register(Map<String,String> input) {
+        String username=text(input.get("username"),"用户名",50);
+        String password=input.getOrDefault("password","");
+        if (password.length()<6 || password.length()>100) throw new IllegalArgumentException("密码长度须为6至100个字符");
+        String name=text(input.get("name"),"姓名",50), studentNo=text(input.get("student_no"),"学号",30);
+        String className=text(input.get("class_name"),"班级",50), phone=text(input.get("phone"),"联系电话",30);
+        db.update("INSERT INTO `user`(username,password_hash,role) VALUES (?,?,'STUDENT')",username,passwords.encode(password));
+        Long userId=db.queryForObject("SELECT id FROM `user` WHERE username=?",Long.class,username);
+        db.update("INSERT INTO student(user_id,student_no,name,class_name,phone) VALUES (?,?,?,?,?)",userId,studentNo,name,className,phone);
+    }
     public List<Map<String,Object>> freeBeds() { return db.queryForList("SELECT b.id, CONCAT(d.building,' ',d.room_no,' / ',b.bed_no,'号床') AS label FROM bed b JOIN dormitory d ON d.id=b.dormitory_id WHERE b.status='FREE' ORDER BY d.building,d.room_no,b.bed_no"); }
     public Map<String,Object> activeHousing(String username) {
         List<Map<String,Object>> rows=db.queryForList("SELECT id, status FROM housing WHERE student_id=? AND status IN ('PENDING','ASSIGNED','CHECKED_IN') ORDER BY id DESC LIMIT 1", studentId(username));
@@ -77,14 +90,14 @@ public class BusinessService {
             String like = "%" + keyword.trim() + "%"; args.add(like); args.add(like); args.add(like);
         }
         if (dorm != null && !dorm.isBlank()) {
-            where.append(" AND CONCAT(IFNULL(d.building,''), ' ', IFNULL(d.room_no,'')) LIKE ?");
+            where.append(" AND x.location LIKE ?");
             args.add("%" + dorm.trim() + "%");
         }
-        String from = " FROM repair x JOIN student s ON s.id=x.student_id LEFT JOIN housing h ON h.active_student_id=s.id LEFT JOIN bed b ON b.id=h.bed_id LEFT JOIN dormitory d ON d.id=b.dormitory_id";
+        String from = " FROM repair x JOIN student s ON s.id=x.student_id";
         long total = db.queryForObject("SELECT COUNT(*)" + from + where, Long.class, args.toArray());
         int pages = (int) Math.max(1, (total + 9) / 10), page = Math.max(1, Math.min(requested, pages));
         args.add((page - 1) * 10);
-        String sql = "SELECT x.*, s.name AS student_name, s.student_no, CONCAT(d.building,' ',d.room_no) AS dorm_label" + from + where + " ORDER BY x.id DESC LIMIT 10 OFFSET ?";
+        String sql = "SELECT x.*, s.name AS student_name, s.student_no, x.location AS dorm_label" + from + where + " ORDER BY x.id DESC LIMIT 10 OFFSET ?";
         return new Page(db.queryForList(sql, args.toArray()), page, pages, total);
     }
     public Map<String,Object> repairDetail(long id,boolean admin,String username) {
@@ -115,26 +128,37 @@ public class BusinessService {
         return selected;
     }
     @Transactional
-    public void createRepair(boolean admin,String username,Long selected,String description) {
+    public void createRepair(boolean admin,String username,Long selected,String description,Long dormitoryId) {
         long student=chosenStudent(admin,username,selected);
-        db.update("INSERT INTO repair(student_id,description,status) VALUES (?,?, 'WAITING')",student,text(description,"故障描述",500));
+        String location=repairLocation(dormitoryId);
+        db.update("INSERT INTO repair(student_id,dormitory_id,location,description,status) VALUES (?,?,?,?, 'WAITING')",student,dormitoryId,location,text(description,"故障描述",500));
+    }
+    private String repairLocation(Long dormitoryId) {
+        if (dormitoryId==null) throw new IllegalArgumentException("请选择报修宿舍");
+        List<String> locations=db.queryForList("SELECT CONCAT(building,' ',room_no) FROM dormitory WHERE id=?",String.class,dormitoryId);
+        if (locations.isEmpty()) throw new IllegalArgumentException("报修宿舍不存在");
+        return locations.get(0);
     }
     @Transactional
-    public void editRepair(long id,boolean admin,String username,String description) {
+    public void editRepair(long id,boolean admin,String username,String description,Long dormitoryId) {
         var record=locked("repair",id); owner(record,admin,username); status(record,"WAITING");
-        db.update("UPDATE repair SET description=? WHERE id=?",text(description,"故障描述",500),id);
+        db.update("UPDATE repair SET description=?,dormitory_id=?,location=? WHERE id=?",text(description,"故障描述",500),dormitoryId,repairLocation(dormitoryId),id);
     }
     @Transactional
     public void deleteRepair(long id,boolean admin,String username) {
         var record=locked("repair",id); owner(record,admin,username); status(record,"WAITING"); db.update("DELETE FROM repair WHERE id=?",id);
     }
     @Transactional
-    public void repairAction(long id,String action,boolean admin,String username,String evaluation) {
+    public void repairAction(long id,String action,boolean admin,String username,String evaluation,String completionNote,String satisfaction) {
         var r=locked("repair",id);
         switch(action) {
             case "accept" -> { if(!admin) throw new IllegalArgumentException("仅管理员可受理"); status(r,"WAITING"); db.update("UPDATE repair SET status='IN_PROGRESS' WHERE id=?",id); }
-            case "complete" -> { if(!admin) throw new IllegalArgumentException("仅管理员可完成报修"); status(r,"IN_PROGRESS"); db.update("UPDATE repair SET status='COMPLETED' WHERE id=?",id); }
-            case "confirm" -> { if(admin) throw new IllegalArgumentException("仅学生可评价"); owner(r,false,username); status(r,"COMPLETED"); db.update("UPDATE repair SET status='CONFIRMED',evaluation=? WHERE id=?",text(evaluation,"评价",500),id); }
+            case "complete" -> { if(!admin) throw new IllegalArgumentException("仅管理员可完成报修"); status(r,"IN_PROGRESS"); db.update("UPDATE repair SET status='COMPLETED',completion_note=? WHERE id=?",text(completionNote,"完成说明",500),id); }
+            case "confirm" -> {
+                if(admin) throw new IllegalArgumentException("仅学生可评价"); owner(r,false,username); status(r,"COMPLETED");
+                if (!"SATISFIED".equals(satisfaction) && !"DISSATISFIED".equals(satisfaction)) throw new IllegalArgumentException("请选择满意或不满意");
+                db.update("UPDATE repair SET status='CONFIRMED',evaluation=?,satisfaction=? WHERE id=?",text(evaluation,"评价",500),satisfaction,id);
+            }
             default -> throw new IllegalArgumentException("操作无效");
         }
     }
@@ -202,11 +226,24 @@ public class BusinessService {
             default -> throw new IllegalArgumentException("操作无效");
         }
     }
-    public Map<String,Object> statistics() {
+    public Map<String,Object> studentStatistics(String username) {
+        long sid=studentId(username);
         Map<String,Object> out=new HashMap<>();
-        out.put("dorms",db.queryForList("SELECT d.building,d.room_no,COUNT(b.id) AS total, COALESCE(SUM(CASE WHEN b.status='OCCUPIED' THEN 1 ELSE 0 END),0) AS occupied FROM dormitory d LEFT JOIN bed b ON b.dormitory_id=d.id GROUP BY d.id,d.building,d.room_no ORDER BY d.building,d.room_no"));
+        var housing=db.queryForList("SELECT h.status,h.checkout_requested_at,CONCAT(d.building,' ',d.room_no,' / ',b.bed_no,'号床') AS bed_label FROM housing h LEFT JOIN bed b ON b.id=h.bed_id LEFT JOIN dormitory d ON d.id=b.dormitory_id WHERE h.student_id=? AND h.status IN ('PENDING','ASSIGNED','CHECKED_IN') ORDER BY h.id DESC LIMIT 1",sid);
+        out.put("housing",housing.isEmpty()?null:housing.get(0));
+        out.put("repairs",db.queryForMap("SELECT COUNT(*) AS total,COALESCE(SUM(status IN ('WAITING','IN_PROGRESS')),0) AS pending,COALESCE(SUM(status='COMPLETED'),0) AS awaiting_evaluation FROM repair WHERE student_id=?",sid));
+        out.put("repairStates",db.queryForList("SELECT status,COUNT(*) AS total FROM repair WHERE student_id=? GROUP BY status ORDER BY status",sid));
+        return out;
+    }
+    public Map<String,Object> publicStatistics() {
+        Map<String,Object> out=new HashMap<>();
         out.put("beds",db.queryForMap("SELECT COUNT(*) AS total,COALESCE(SUM(status='OCCUPIED'),0) AS occupied FROM bed"));
         out.put("repairs",db.queryForMap("SELECT COUNT(*) AS total,COALESCE(SUM(status IN ('COMPLETED','CONFIRMED')),0) AS done FROM repair"));
+        return out;
+    }
+    public Map<String,Object> statistics() {
+        Map<String,Object> out=new HashMap<>(publicStatistics());
+        out.put("dorms",db.queryForList("SELECT d.building,d.room_no,COUNT(b.id) AS total, COALESCE(SUM(CASE WHEN b.status='OCCUPIED' THEN 1 ELSE 0 END),0) AS occupied FROM dormitory d LEFT JOIN bed b ON b.dormitory_id=d.id GROUP BY d.id,d.building,d.room_no ORDER BY d.building,d.room_no"));
         out.put("repairStates",db.queryForList("SELECT status,COUNT(*) AS total FROM repair GROUP BY status ORDER BY status"));
         return out;
     }

@@ -24,7 +24,7 @@ import org.springframework.http.HttpStatus;
 @Configuration
 public class SecurityConfig {
     @Bean SecurityFilterChain security(HttpSecurity http, SessionRegistry sessionRegistry) throws Exception {
-        return http.authorizeHttpRequests(a -> a.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/dashboard", "/repairs", "/housing", "/profile", "/students", "/dormitories", "/beds", "/users", "/api/csrf", "/api/login").permitAll()
+        return http.authorizeHttpRequests(a -> a.requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/dashboard", "/repairs", "/housing", "/profile", "/students", "/dormitories", "/beds", "/users", "/visitors", "/api/csrf", "/api/login", "/api/register", "/api/statistics").permitAll()
                 .requestMatchers("/api/admin/**").hasRole("ADMIN").anyRequest().authenticated())
             .exceptionHandling(e -> e.defaultAuthenticationEntryPointFor(new HttpStatusEntryPoint(HttpStatus.UNAUTHORIZED), new AntPathRequestMatcher("/api/**")))
             .sessionManagement(s -> s.sessionConcurrency(c -> c.maximumSessions(-1).sessionRegistry(sessionRegistry)

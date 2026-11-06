@@ -12,7 +12,7 @@ services:
       - "127.0.0.1:${MYSQL_PORT:-3307}:3306"
     volumes:
       - dorm_mysql:/var/lib/mysql
-      - ./sql/assignment2-original.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
+      - ./sql/init.sql:/docker-entrypoint-initdb.d/01-schema.sql:ro
       - ./sql/mysql-client.cnf:/etc/mysql/conf.d/dorm-client.cnf:ro
     healthcheck:
       test: ["CMD-SHELL", "mysqladmin ping -h 127.0.0.1 -u root -p$$MYSQL_ROOT_PASSWORD --silent"]
